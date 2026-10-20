@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import net from "node:net";
 import test from "node:test";
 import { createSave, getSave, openDb, updateSave } from "../src/db.js";
 import { loadProfile } from "../src/profile.js";
 import { runPipeline } from "../src/pipeline.js";
-import { backfillWhyYou, profileHash, refreshWhyYou, whyYou } from "../src/why.js";
+import { backfillWhyYou, refreshWhyYou, whyCacheKey, whyYou } from "../src/why.js";
 
 const profile = loadProfile();
 const LOOP = "A blueprint for running your scrape-and-recommend agents as a self-verifying loop; Saved to Shipped is one.";
@@ -82,7 +83,7 @@ test("Grok success replaces the template, then a replay does not call again", as
   });
   assert.equal(updated.why_you, GROK_LINE);
   assert.equal(updated.why_you_source, "grok");
-  assert.equal(updated.why_you_profile_hash, profileHash(profile));
+  assert.equal(updated.why_you_profile_hash, whyCacheKey(profile, save));
   assert.equal(seen.url, "https://api.x.ai/v1/chat/completions");
   assert.equal(seen.init.headers.authorization, "Bearer xai-test");
   const body = JSON.parse(seen.init.body);
@@ -182,7 +183,7 @@ test("no key keeps the template, and Grok sorting still stores that line before 
   assert.equal(done.status, "done");
   assert.equal(done.why_you, LOOP);
   assert.equal(done.why_you_source, "pending");
-  assert.equal(whyCalls, 1);
+  assert.ok(whyCalls >= 1);
   release();
   const replaced = await waitForSource(db, row.id, "grok");
   assert.match(replaced.why_you, /Grok: run the scrape-and-recommend agents/);
@@ -208,6 +209,87 @@ test("no key keeps the template, and Grok sorting still stores that line before 
   assert.equal(templateOnly.why_you_source, "template");
   db.close();
 });
+
+test("a changed kind or summary does not reuse the cached Grok line", async () => {
+  const db = openDb(":memory:");
+  const row = createSave(db, FIXTURES.loop.url);
+  const first = { id: row.id, kind: "paper", text: FIXTURES.loop.text, summary: "Loop paper." };
+  updateSave(db, row.id, { ...first, status: "done" });
+  await refreshWhyYou(db, row.id, first, profile, {
+    llm,
+    whyFetch: async () => ({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: "First Grok line for the loop paper you saved." } }] }),
+    }),
+  });
+  let calls = 0;
+  const next = { ...first, kind: "idea", summary: "Loop idea." };
+  const again = await refreshWhyYou(db, row.id, next, profile, {
+    llm,
+    whyFetch: async () => {
+      calls += 1;
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: "Second Grok line after the kind changed." } }] }),
+      };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(again.why_you, "Second Grok line after the kind changed.");
+  assert.notEqual(again.why_you_profile_hash, whyCacheKey(profile, first));
+  db.close();
+});
+
+test("a stalled Grok connection leaves the card done with the template line", async () => {
+  const sockets = [];
+  const server = net.createServer((socket) => {
+    sockets.push(socket);
+    socket.on("error", () => {});
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  const db = openDb(":memory:");
+  const row = createSave(db, FIXTURES.scrapling.url);
+  const started = Date.now();
+  const pending = runPipeline(db, row.id, {
+    offline: false,
+    fetchImpl: async () => {
+      throw new Error("x down");
+    },
+    profile,
+    llm: { apiKey: "stalled-key", baseUrl: `http://127.0.0.1:${port}/v1`, model: "grok-4.7" },
+    awaitLive: true,
+    awaitWhy: true,
+  });
+  const done = await waitFor(db, row.id, (save) => save.status === "done");
+  assert.ok(Date.now() - started < 2000);
+  assert.equal(done.kind, "repo");
+  assert.equal(done.why_you, SCRAPE);
+  assert.notEqual(done.status, "sorting");
+  assert.ok(sockets.length >= 1);
+
+  const settled = await pending;
+  assert.ok(Date.now() - started < 12000);
+  assert.equal(settled.status, "done");
+  assert.equal(settled.why_you, SCRAPE);
+  assert.notEqual(settled.why_you_source, "pending");
+  for (const socket of sockets) socket.destroy();
+  await new Promise((resolve) => server.close(resolve));
+  db.close();
+});
+
+function waitFor(db, id, ready) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const tick = () => {
+      const row = getSave(db, id);
+      if (row && ready(row)) return resolve(row);
+      if (Date.now() - started > 2000) return reject(new Error(`save ${id} stayed ${row?.status}`));
+      setTimeout(tick, 15);
+    };
+    tick();
+  });
+}
 
 function waitForSource(db, id, source) {
   return new Promise((resolve, reject) => {

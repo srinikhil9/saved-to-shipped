@@ -75,6 +75,7 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   const html = await feed.text();
   assert.match(html, /Save it\. Ship it\./);
   assert.doesNotMatch(html, /http-equiv="refresh"/);
+  assert.doesNotMatch(html, /data-upgrade="pending"/);
   assert.match(html, /data-kind="repo"/);
   assert.match(html, /data-kind="paper"/);
   assert.match(html, /data-kind="idea"/);
@@ -87,6 +88,7 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   const detail = await fetch(`${base}/saves/${ids[0]}`);
   const detailHtml = await detail.text();
   assert.match(detailHtml, /Show last run/);
+  assert.doesNotMatch(detailHtml, /location\.reload/);
   assert.match(detailHtml, /Why you/);
   assert.match(detailHtml, /social-data scraping pipeline/);
   assert.match(detailHtml, /scrapling-seed\.png/);

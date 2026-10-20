@@ -83,12 +83,52 @@ const INTERRUPTED = "This save was interrupted when the server stopped. Run it a
 
 export function failStuckSaves(db) {
   const stuck = db
-    .prepare(`SELECT id FROM saves WHERE status IN ('queued', 'sorting', 'acting')`)
+    .prepare(
+      `SELECT id, kind, action_result_json FROM saves WHERE status IN ('queued', 'sorting', 'acting')`,
+    )
     .all();
+  let failed = 0;
+  let restored = 0;
   for (const row of stuck) {
-    updateSave(db, row.id, { status: "failed", error: INTERRUPTED });
+    if (row.kind && row.action_result_json) {
+      updateSave(db, row.id, {
+        status: "done",
+        error: null,
+        action_result_json: withoutPendingUpgrade(row.action_result_json),
+      });
+      restored += 1;
+    } else {
+      updateSave(db, row.id, { status: "failed", error: INTERRUPTED });
+      failed += 1;
+    }
   }
-  return stuck.length;
+  const pending = db
+    .prepare(
+      `SELECT id, action_result_json FROM saves WHERE status = 'done' AND action_result_json LIKE '%"pending"%'`,
+    )
+    .all();
+  let cleared = 0;
+  for (const row of pending) {
+    const next = withoutPendingUpgrade(row.action_result_json);
+    if (next !== row.action_result_json) {
+      updateSave(db, row.id, { action_result_json: next });
+      cleared += 1;
+    }
+  }
+  return { failed, restored, cleared, total: stuck.length };
+}
+
+function withoutPendingUpgrade(json) {
+  if (!json) return json;
+  let action;
+  try {
+    action = JSON.parse(json);
+  } catch {
+    return json;
+  }
+  if (action?.sorted?.upgrade !== "pending") return json;
+  action.sorted.upgrade = null;
+  return JSON.stringify(action);
 }
 
 export function publicSave(row) {

@@ -18,6 +18,7 @@ const DEFAULT_SLOTS = {
 };
 
 const inflight = new Map();
+const tickets = new WeakMap();
 
 /**
  * One template line from data/profile.json.
@@ -42,9 +43,15 @@ export function profileHash(profile = {}) {
   return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
 }
 
-export function cachedWhyYou(row, profile) {
+/** Profile hash plus kind and summary, so a re-sort does not reuse the old line. */
+export function whyCacheKey(profile, save) {
+  const sort = crypto.createHash("sha256").update(`${save?.kind || ""}|${save?.summary || ""}`).digest("hex").slice(0, 12);
+  return `${profileHash(profile)}:${sort}`;
+}
+
+export function cachedWhyYou(row, profile, save = row) {
   if (!row?.why_you || row.why_you_source !== "grok") return null;
-  if (row.why_you_profile_hash !== profileHash(profile)) return null;
+  if (row.why_you_profile_hash !== whyCacheKey(profile, save)) return null;
   return row.why_you;
 }
 
@@ -53,14 +60,15 @@ export function backfillWhyYou(db, profile) {
     .prepare("SELECT * FROM saves WHERE kind IS NOT NULL AND (why_you IS NULL OR why_you = '')")
     .all();
   if (!rows.length) return 0;
-  const hash = profileHash(profile);
   const update = db.prepare(
     `UPDATE saves
      SET why_you = @why_you, why_you_source = 'template', why_you_profile_hash = @hash
      WHERE id = @id`,
   );
   const write = db.transaction((pending) => {
-    for (const row of pending) update.run({ id: row.id, why_you: whyYou(row, profile), hash });
+    for (const row of pending) {
+      update.run({ id: row.id, why_you: whyYou(row, profile), hash: whyCacheKey(profile, row) });
+    }
   });
   write(rows);
   return rows.length;
@@ -72,10 +80,10 @@ export function backfillWhyYou(db, profile) {
  * Offline replays keep the cached Grok line and do not call.
  */
 export function refreshWhyYou(db, id, save, profile, options = {}) {
-  const hash = profileHash(profile);
+  const hash = whyCacheKey(profile, save);
   const row = getSave(db, id);
   if (!row) return Promise.resolve(null);
-  if (cachedWhyYou(row, profile)) return Promise.resolve(row);
+  if (cachedWhyYou(row, profile, save)) return Promise.resolve(row);
 
   const settings = options.llm || llmSettings(options.env || {});
   if (!settings.apiKey) return Promise.resolve(row);
@@ -84,6 +92,7 @@ export function refreshWhyYou(db, id, save, profile, options = {}) {
   const flightKey = `${id}:${hash}`;
   const pending = inflight.get(flightKey);
   if (pending) return pending;
+  const ticket = nextTicket(db, id);
   updateSave(db, id, { why_you_source: "pending" });
 
   const timeoutMs = options.whyTimeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -93,9 +102,9 @@ export function refreshWhyYou(db, id, save, profile, options = {}) {
     timeoutMs,
   )
     .then((text) => {
+      if (!ticketCurrent(db, id, ticket)) return getSave(db, id);
       const current = getSave(db, id);
       if (!current) return null;
-      if (current.why_you_profile_hash && current.why_you_profile_hash !== hash) return current;
       if (!text) {
         return updateSave(db, id, { why_you_source: "template" });
       }
@@ -106,6 +115,7 @@ export function refreshWhyYou(db, id, save, profile, options = {}) {
       });
     })
     .catch(() => {
+      if (!ticketCurrent(db, id, ticket)) return getSave(db, id);
       const current = getSave(db, id);
       if (current?.why_you_source === "pending") {
         return updateSave(db, id, { why_you_source: "template" });
@@ -120,8 +130,8 @@ export function refreshWhyYou(db, id, save, profile, options = {}) {
 }
 
 export function storeWhyLine(db, id, save, profile) {
-  const hash = profileHash(profile);
-  const cached = cachedWhyYou(getSave(db, id), profile);
+  const hash = whyCacheKey(profile, save);
+  const cached = cachedWhyYou(getSave(db, id), profile, save);
   return updateSave(db, id, {
     why_you: cached || whyYou(save, profile),
     why_you_source: cached ? "grok" : "template",
@@ -207,6 +217,21 @@ function cleanGrokText(value) {
   if (!text || text.length < 20 || text.length > 500) return "";
   const parts = text.split(/(?<=[.!?])\s+/).filter(Boolean);
   return parts.slice(0, 2).join(" ");
+}
+
+function nextTicket(db, id) {
+  let byId = tickets.get(db);
+  if (!byId) {
+    byId = new Map();
+    tickets.set(db, byId);
+  }
+  const next = (byId.get(id) || 0) + 1;
+  byId.set(id, next);
+  return next;
+}
+
+function ticketCurrent(db, id, ticket) {
+  return tickets.get(db)?.get(id) === ticket;
 }
 
 function withTimeout(promise, ms) {
