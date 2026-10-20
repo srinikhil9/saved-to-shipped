@@ -1,0 +1,50 @@
+{
+  "repo": "https://github.com/D4Vinci/Scrapling",
+  "language": "python",
+  "commands": [
+    {
+      "cmd": "git clone --depth 1 https://github.com/D4Vinci/Scrapling.git /tmp/sts-run-2wlLPd/repo",
+      "exit_code": 0,
+      "duration_ms": 574,
+      "timed_out": false
+    },
+    {
+      "cmd": "python3 -m venv /tmp/sts-run-2wlLPd/repo/.venv",
+      "exit_code": 0,
+      "duration_ms": 2041,
+      "timed_out": false
+    },
+    {
+      "cmd": "/tmp/sts-run-2wlLPd/repo/.venv/bin/pip install .[fetchers]",
+      "exit_code": 0,
+      "duration_ms": 6048,
+      "timed_out": false
+    },
+    {
+      "cmd": "/tmp/sts-run-2wlLPd/repo/.venv/bin/python -u /tmp/sts-run-2wlLPd/repo/_sts_smoke.py",
+      "exit_code": 0,
+      "duration_ms": 240,
+      "timed_out": false
+    }
+  ],
+  "exit_code": 0,
+  "duration_ms": 8910,
+  "run_duration_ms": 240,
+  "timestamp": "2026-10-20T01:44:40.217Z",
+  "extracted_sample": [
+    "The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.",
+    "It is our choices, Harry, that show what we truly are, far more than our abilities.",
+    "There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle.",
+    "The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.",
+    "Imperfection is beauty, madness is genius and it's better to be absolutely ridiculous than absolutely boring.",
+    "Try not to become a man of success. Rather become a man of value.",
+    "It is better to be hated for what you are than to be loved for what you are not.",
+    "I have not failed. I've just found 10,000 ways that won't work."
+  ],
+  "stdout": "['“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”', '“It is our choices, Harry, that show what we truly are, far more than our abilities.”', '“There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle.”', '“The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.”', \"“Imperfection is beauty, madness is genius and it's better to be absolutely ridiculous than absolutely boring.”\", '“Try not to become a man of success. Rather become a man of value.”', '“It is better to be hated for what you are than to be loved for what you are not.”', \"“I have not failed. I've just found 10,000 ways that won't work.”\", \"“A woman is like a tea bag; you never know how strong it is until it's in hot water.”\", '“A day without sunshine is like, you know, night.”']\n",
+  "stderr": "[2026-10-20 01:44:49] INFO: Fetched (200) <GET https://quotes.toscrape.com/> (referer: https://www.google.com/)\n",
+  "timed_out": false,
+  "smoke_source": "readme",
+  "screenshot_path": "/screenshots/scrapling-seed.png",
+  "screenshot_file": "scrapling-seed.png"
+}

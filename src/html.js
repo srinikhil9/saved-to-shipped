@@ -129,16 +129,47 @@ function renderCard(save) {
       <h2><a href="/saves/${save.id}">${escapeHtml(cardTitle(save))}</a></h2>
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
+      ${action?.act?.status === "cached" ? `<span class="badge other">cached</span>` : ""}
+      ${action?.act?.fallback_note ? `<p class="repo">${escapeHtml(action.act.fallback_note)}</p>` : ""}
+      ${action?.act?.attempt_error ? `<p class="error">${escapeHtml(clip(action.act.attempt_error))}</p>` : ""}
+      ${installNote(action?.act)}
+      ${save.screenshot_path ? `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">` : ""}
       ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
     </article>
   `;
 }
 
 function renderLastRun(save, act) {
-  if (save.screenshot_path) {
-    return `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">`;
+  const sample = Array.isArray(act?.extracted_sample) ? act.extracted_sample : [];
+  const parts = [];
+  if (act?.status === "cached") parts.push(`<p class="badge other">cached</p>`);
+  if (act?.fallback_note) parts.push(`<p class="repo">${escapeHtml(act.fallback_note)}</p>`);
+  if (act?.warning) parts.push(`<p class="repo">${escapeHtml(act.warning)}</p>`);
+  if (act?.attempt_error) parts.push(`<p class="error">${escapeHtml(act.attempt_error)}</p>`);
+  if (act?.install_step) parts.push(`<p class="repo">install ${escapeHtml(act.install_step)}</p>`);
+  if (act?.install_stderr && !String(act.attempt_error || "").includes(String(act.install_stderr).slice(0, 80))) {
+    parts.push(`<h3>install</h3><pre class="post">${escapeHtml(clip(act.install_stderr, 2000))}</pre>`);
   }
-  const reason = act?.reason || "No cached run yet.";
+  if (act && (save.screenshot_path || act.stdout)) {
+    const bits = [
+      act.language || "",
+      act.exit_code == null ? "" : `exit ${act.exit_code}`,
+      act.smoke_source ? `${act.smoke_source} quickstart` : "",
+      act.timestamp || "",
+    ].filter(Boolean);
+    if (bits.length) parts.push(`<p class="repo">${escapeHtml(bits.join(" · "))}</p>`);
+  }
+  if (sample.length) {
+    parts.push(`<ul class="sample">${sample.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`);
+  }
+  if (save.screenshot_path) {
+    parts.push(`<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">`);
+  }
+  if (act?.stdout) {
+    parts.push(`<h3>stdout</h3><pre class="post" id="stdout">${escapeHtml(act.stdout)}</pre>`);
+  }
+  if (parts.length) return parts.join("");
+  const reason = act?.reason || act?.error || "No cached run yet.";
   return `<p>${escapeHtml(reason)} When a run exists, this spot replays the cached stdout and screenshot without calling the network again.</p>`;
 }
 
@@ -264,7 +295,9 @@ function layout({ title, body }) {
     .details dd { margin: 0; overflow-wrap: anywhere; }
     .last-run { padding: 14px; margin-top: 8px; }
     .error { color: var(--bad); }
-    .shot { max-width: 100%; border-radius: 12px; }
+    .shot { max-width: 100%; border-radius: 12px; margin-top: 10px; display: block; }
+    .sample { margin: 8px 0 4px; padding-left: 18px; }
+    .last-run h3 { margin: 14px 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
     @media (max-width: 640px) {
       h1 { font-size: 34px; }
       .row { flex-direction: column; }
@@ -295,6 +328,19 @@ function detailRow(label, value) {
   const href = typeof value === "string" ? safeHref(value) : null;
   const shown = href ? `<a href="${escapeHtml(href)}">${escapeHtml(href)}</a>` : escapeHtml(String(value));
   return `<dt>${escapeHtml(label)}</dt><dd>${shown}</dd>`;
+}
+
+function clip(text, max = 600) {
+  const value = String(text || "");
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function installNote(act) {
+  if (!act?.install_stderr) return "";
+  const head = String(act.install_stderr).slice(0, 80);
+  if (act.attempt_error && String(act.attempt_error).includes(head)) return "";
+  return `<p class="error">${escapeHtml(clip(act.install_stderr))}</p>`;
 }
 
 function excerpt(text) {

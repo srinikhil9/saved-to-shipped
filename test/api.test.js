@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/db.js";
@@ -12,7 +15,8 @@ const SEEDS = [
 
 test("API and HTML feed sort pasted seed URLs", async (t) => {
   const db = openDb(":memory:");
-  const app = createApp(db, { offline: true, env: {} });
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "saves-api-"));
+  const app = createApp(db, { offline: true, env: {}, cacheDir });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -42,7 +46,13 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   );
   assert.equal(done[0].status, "done");
   assert.equal(done[0].why_you, null);
-  assert.equal(done[0].action_result_json.act.status, "skipped");
+  assert.equal(done[0].error, null);
+  assert.equal(done[0].action_result_json.act.status, "cached");
+  assert.equal(done[0].action_result_json.act.repo, "https://github.com/D4Vinci/Scrapling");
+  assert.equal(done[0].screenshot_path, "/screenshots/scrapling-seed.png");
+  assert.ok(done[0].action_result_json.act.extracted_sample.length >= 1);
+  assert.equal(done[1].action_result_json.act.status, "skipped");
+  assert.equal(done[1].screenshot_path, null);
 
   const list = await fetch(`${base}/api/saves`).then((response) => response.json());
   assert.equal(list.length, 3);
@@ -58,7 +68,7 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   const html = await feed.text();
   assert.match(html, /Save it\. Ship it\./);
   assert.doesNotMatch(html, /http-equiv="refresh"/);
-  assert.match(html, /data-upgrade='pending'/);
+  assert.doesNotMatch(html, /data-upgrade="pending"/);
   assert.match(html, /data-kind="repo"/);
   assert.match(html, /data-kind="paper"/);
   assert.match(html, /data-kind="idea"/);
@@ -69,7 +79,14 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   const detailHtml = await detail.text();
   assert.match(detailHtml, /Show last run/);
   assert.doesNotMatch(detailHtml, /location\.reload/);
-  assert.match(detailHtml, /Repo runner lands in the next step/);
+  assert.match(detailHtml, /scrapling-seed\.png/);
+  assert.match(detailHtml, /id="stdout"/);
+  const quote = done[0].action_result_json.act.extracted_sample[0].slice(0, 24);
+  assert.match(detailHtml, new RegExp(quote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const shot = await fetch(`${base}${done[0].screenshot_path}`);
+  assert.equal(shot.status, 200);
+  const png = Buffer.from(await shot.arrayBuffer());
+  assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
 
   const missing = await fetch(`${base}/api/saves/99999`);
   assert.equal(missing.status, 404);

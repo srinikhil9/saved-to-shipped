@@ -2,6 +2,8 @@ import { act } from "./act.js";
 import { classifyHeuristic, classifyWithGrok } from "./classify.js";
 import { getSave, updateSave } from "./db.js";
 import { expandPostLinks } from "./expand.js";
+import { asCachedReplay, lastGoodRun } from "./runner/fallback.js";
+import { isOffline } from "./runner/python.js";
 import { combinedText, ingest, readSavedPost } from "./ingest.js";
 
 const generations = new WeakMap();
@@ -10,25 +12,28 @@ const flights = new WeakMap();
 /**
  * Stages for one save: ingest → sort → act.
  * Relate (why_you, from data/profile.json) is a later step and stays null.
- * A saved copy is sorted immediately. A live read, when it succeeds, updates
- * that card and is cached for the next offline replay.
+ * A saved copy is sorted immediately from the committed repo run when one
+ * exists. A live read, when it succeeds, may replace that run. A failed or
+ * over-budget live run keeps the row's own last good run, then the fixture.
  *
  * The regex result is stored before Grok is called. One Grok flight runs per
- * pipeline generation, so the live refresh does not call Grok again.
+ * pipeline generation, so the live refresh does not call Grok again. Grok
+ * re-runs the repo only when the kind or repo URL changed.
  */
 export async function runPipeline(db, id, options = {}) {
   const existing = getSave(db, id);
   if (!existing) return null;
   const snapshot = snapshotOf(existing);
+  const offline = options.offline === true || isOffline();
   const generation = bumpGeneration(db, id);
-  const runOptions = { ...options, generation };
+  const runOptions = { ...options, offline, generation, snapshot };
   try {
     updateSave(db, id, { status: "sorting", error: null });
-    if (!runOptions.offline) {
+    if (!runOptions.offline && !runOptions.forceLive) {
       const saved = readSavedPost(existing.url, runOptions);
       if (saved) {
         const prepared = await expandPostLinks(saved, runOptions.fetchImpl || globalThis.fetch);
-        const done = await storeSorted(db, id, prepared, runOptions);
+        const done = await storeSorted(db, id, prepared, { ...runOptions, repoMode: "cache" });
         const pending = refreshFromLive(db, id, existing.url, runOptions);
         if (runOptions.awaitLive) await pending;
         await upgradeFor(db, id, generation);
@@ -36,7 +41,10 @@ export async function runPipeline(db, id, options = {}) {
       }
     }
     const post = await ingest(existing.url, runOptions);
-    const done = await storeSorted(db, id, post, runOptions);
+    const done = await storeSorted(db, id, post, {
+      ...runOptions,
+      repoMode: runOptions.repoMode || (runOptions.offline ? "cache" : "live"),
+    });
     await upgradeFor(db, id, generation);
     return getSave(db, id) || done;
   } catch (error) {
@@ -62,6 +70,7 @@ export async function runPipeline(db, id, options = {}) {
 
 async function storeSorted(db, id, post, options) {
   const generation = options.generation;
+  const snapshot = options.snapshot;
   if (!generation || generation !== generationOf(db, id)) return getSave(db, id);
 
   const input = { text: combinedText(post), links: post.links || [] };
@@ -76,15 +85,38 @@ async function storeSorted(db, id, post, options) {
   if (generation !== generationOf(db, id)) return getSave(db, id);
 
   const current = getSave(db, id);
-  const action = await act({ ...current, kind: basis.kind, details: basis.details }, { env: options.childEnv || {} });
+  const action = await act(
+    { ...current, kind: basis.kind, details: basis.details, previous: snapshot },
+    actOptions(options),
+  );
   if (generation !== generationOf(db, id)) return getSave(db, id);
+
+  const failed = action?.status === "failed";
+  if (failed && snapshot?.kind && snapshot?.action_result_json) {
+    const preserved = preserveGood(snapshot, action.error);
+    return updateSave(db, id, {
+      status: "done",
+      author: snapshot.author,
+      text: snapshot.text,
+      kind: snapshot.kind,
+      summary: snapshot.summary,
+      why_you: snapshot.why_you,
+      screenshot_path: preserved.screenshot_path,
+      action_result_json: preserved.json,
+      error: null,
+    });
+  }
 
   const latest = getSave(db, id);
   const plan = planSort(latest, basis, generation, options.llm);
+  const storedAct = plan.keepAct && action?.status !== "ok" && !action?.attempt_error ? plan.keepAct : action;
+  const screenshotPath =
+    storedAct?.screenshot_path || (storedAct?.warning ? snapshot?.screenshot_path || latest?.screenshot_path || null : null);
   const saved = updateSave(db, id, {
-    status: "done",
+    status: failed ? "failed" : "done",
     kind: plan.kind,
     summary: plan.summary,
+    screenshot_path: screenshotPath,
     action_result_json: JSON.stringify({
       sorted: {
         source: plan.source,
@@ -97,13 +129,13 @@ async function storeSorted(db, id, post, options) {
         upgrade: plan.upgrade,
         generation,
       },
-      act: plan.keepAct || action,
+      act: { ...storedAct, screenshot_path: screenshotPath },
     }),
-    error: null,
+    error: failed ? action?.error || "Repo run failed" : null,
   });
 
   if (plan.schedule && reserveFlight(db, id, generation)) {
-    const upgrade = classifyWithGrok(input, heuristic, {
+    const upgrade = classifyWithGrok(input, basis, {
       llm: options.llm,
       fetchImpl: options.llmFetch,
       timeoutMs: options.llmTimeoutMs,
@@ -118,8 +150,40 @@ async function storeSorted(db, id, post, options) {
 
 function refreshFromLive(db, id, url, options) {
   return ingest(url, { ...options, skipSaved: true })
-    .then((post) => storeSorted(db, id, post, { ...options, refresh: true }))
-    .catch(() => {});
+    .then((post) => storeSorted(db, id, post, { ...options, refresh: true, repoMode: "live" }))
+    .catch((error) => {
+      const snapshot = options.snapshot;
+      if (!lastGoodRun(snapshot)) return;
+      const preserved = preserveGood(snapshot, error instanceof Error ? error.message : String(error));
+      updateSave(db, id, {
+        status: "done",
+        author: snapshot.author,
+        text: snapshot.text,
+        kind: snapshot.kind,
+        summary: snapshot.summary,
+        why_you: snapshot.why_you,
+        screenshot_path: preserved.screenshot_path,
+        action_result_json: preserved.json,
+        error: null,
+      });
+    });
+}
+
+function preserveGood(snapshot, attemptError) {
+  let parsed = {};
+  try {
+    parsed = JSON.parse(snapshot.action_result_json);
+  } catch {
+    parsed = {};
+  }
+  const acted = asCachedReplay(
+    { ...(parsed.act || {}), screenshot_path: snapshot.screenshot_path || parsed.act?.screenshot_path || null },
+    attemptError,
+  );
+  return {
+    screenshot_path: acted.screenshot_path,
+    json: JSON.stringify({ ...parsed, act: acted }),
+  };
 }
 
 function preserveSeedRepo(row, heuristic) {
@@ -143,6 +207,16 @@ function ensureRepoLink(links, repoUrl) {
   return [...links, { short: null, expanded: repoUrl }];
 }
 
+function actOptions(options) {
+  return {
+    offline: options.offline === true,
+    repoMode: options.repoMode,
+    demoBudgetMs: options.demoBudgetMs,
+    runRepo: options.runRepo,
+    screenshotDir: options.screenshotDir,
+  };
+}
+
 async function applyUpgrade(db, id, generation, upgraded, options) {
   if (generation !== generationOf(db, id)) return;
   const row = getSave(db, id);
@@ -154,22 +228,37 @@ async function applyUpgrade(db, id, generation, upgraded, options) {
     updateSave(db, id, { action_result_json: JSON.stringify(action) });
     return;
   }
-  const acted = await act({ ...row, kind: upgraded.kind, details: upgraded.details }, { env: options.childEnv || {} });
+
+  const previousUrl = action.sorted.details?.repo_url || null;
+  const incomingUrl = upgraded.details?.repo_url || null;
+  const nextUrl = incomingUrl || previousUrl;
+  const nextDetails = { ...upgraded.details, repo_url: nextUrl };
+  const kindChanged = upgraded.kind !== row.kind;
+  const urlChanged = Boolean(incomingUrl) && !sameRepoUrl(incomingUrl, previousUrl);
+  let acted = action.act;
+  if (kindChanged || urlChanged) {
+    acted = await act(
+      { ...row, kind: upgraded.kind, details: nextDetails, previous: options.snapshot },
+      { ...actOptions(options), repoMode: options.offline ? "cache" : "live" },
+    );
+  }
   if (generation !== generationOf(db, id)) return;
   const latest = getSave(db, id);
   const latestAction = parseAction(latest?.action_result_json);
   if (!latestAction?.sorted || latestAction.sorted.generation !== generation) return;
   latestAction.sorted.source = "llm";
-  latestAction.sorted.details = upgraded.details;
+  latestAction.sorted.details = nextDetails;
   latestAction.sorted.upgrade = "done";
   latestAction.act = acted;
-  updateSave(db, id, {
+  const patch = {
     status: "done",
     kind: upgraded.kind,
     summary: upgraded.summary || latest.summary,
     action_result_json: JSON.stringify(latestAction),
     error: null,
-  });
+  };
+  if (acted?.screenshot_path) patch.screenshot_path = acted.screenshot_path;
+  updateSave(db, id, patch);
 }
 
 function planSort(row, heuristic, generation, llm) {
@@ -195,6 +284,16 @@ function planSort(row, heuristic, generation, llm) {
     schedule: Boolean(llm?.apiKey),
     keepAct: null,
   };
+}
+
+function sameRepoUrl(left, right) {
+  const norm = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/\.git$/, "")
+      .replace(/\/$/, "")
+      .toLowerCase();
+  return norm(left) === norm(right);
 }
 
 function bumpGeneration(db, id) {

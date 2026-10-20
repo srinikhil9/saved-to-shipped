@@ -2,8 +2,10 @@ import fs from "node:fs";
 import { createApp } from "./app.js";
 import { failStuckSaves, openDb } from "./db.js";
 import { paths } from "./paths.js";
+import { restoreCachedScreenshots } from "./runner/cache.js";
 
 fs.mkdirSync(paths.screenshots, { recursive: true });
+restoreCachedScreenshots();
 
 const db = openDb(process.env.DB_PATH || paths.db);
 const settled = failStuckSaves(db);
