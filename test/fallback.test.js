@@ -7,6 +7,13 @@ import { actOnRepo } from "../src/act.js";
 import { createSave, openDb, updateSave } from "../src/db.js";
 import { runPipeline } from "../src/pipeline.js";
 
+const savedIngestOffline = process.env.INGEST_OFFLINE;
+delete process.env.INGEST_OFFLINE;
+process.on("exit", () => {
+  if (savedIngestOffline === undefined) delete process.env.INGEST_OFFLINE;
+  else process.env.INGEST_OFFLINE = savedIngestOffline;
+});
+
 const URL = "https://x.com/hasantoxr/status/2025902150296236050";
 
 test("a screenshot failure does not fail the run", async () => {
@@ -46,7 +53,7 @@ test("a failed rerun keeps the last good run and labels the fallback", async () 
   assert.equal(first.status, "done");
   assert.equal(first.screenshot_path, "/screenshots/scrapling-seed.png");
   const goodStdout = JSON.parse(first.action_result_json).act.stdout;
-  assert.ok(goodStdout.includes("quotes.toscrape") || goodStdout.includes("The world"));
+  assert.ok(goodStdout.includes("Godpack") || goodStdout.includes("yc-oss.github.io"));
 
   const again = await runPipeline(db, row.id, {
     offline: false,

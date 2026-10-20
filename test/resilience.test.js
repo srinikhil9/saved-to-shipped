@@ -5,9 +5,18 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createApp } from "../src/app.js";
-import { createSave, failStuckSaves, openDb, updateSave } from "../src/db.js";
+import { createSave, failStuckSaves, getSave, openDb, updateSave } from "../src/db.js";
 import { sanitizedEnv } from "../src/env.js";
+import { renderDetail } from "../src/html.js";
 import { ingest, READ_FAILED } from "../src/ingest.js";
+import { runPipeline } from "../src/pipeline.js";
+
+const savedIngestOffline = process.env.INGEST_OFFLINE;
+delete process.env.INGEST_OFFLINE;
+process.on("exit", () => {
+  if (savedIngestOffline === undefined) delete process.env.INGEST_OFFLINE;
+  else process.env.INGEST_OFFLINE = savedIngestOffline;
+});
 
 const JACK = "https://x.com/jack/status/20";
 
@@ -131,6 +140,120 @@ test("server startup marks stuck cards failed and leaves finished cards", () => 
   db.close();
 });
 
+test("startup clears a pending why_you so the detail page stops reloading", () => {
+  const db = openDb(":memory:");
+  const row = createSave(db, "https://x.com/hasantoxr/status/2025902150296236050");
+  updateSave(db, row.id, {
+    status: "done",
+    kind: "repo",
+    summary: "Scrapling scrapes.",
+    why_you: "Drop-in for your social-data scraping pipeline.",
+    why_you_source: "pending",
+    action_result_json: JSON.stringify({
+      sorted: { source: "heuristic", details: { repo_url: "https://github.com/D4Vinci/Scrapling" } },
+      act: { status: "cached" },
+    }),
+  });
+
+  failStuckSaves(db);
+  const settled = getSave(db, row.id);
+  assert.equal(settled.status, "done");
+  assert.equal(settled.why_you_source, "template");
+  assert.equal(settled.why_you, "Drop-in for your social-data scraping pipeline.");
+  const html = renderDetail(settled);
+  assert.match(html, /Why you/);
+  assert.doesNotMatch(html, /location\.reload/);
+  db.close();
+});
+
+test("startup clears a pending paper spec and leaves the template zip", () => {
+  const db = openDb(":memory:");
+  const row = createSave(db, "https://x.com/0xCodez/status/2069736449902027136");
+  updateSave(db, row.id, {
+    status: "done",
+    kind: "paper",
+    summary: "Loop Engineering.",
+    why_you: "A blueprint for running your scrape-and-recommend agents as a self-verifying loop; Saved to Shipped is one.",
+    why_you_source: "template",
+    action_result_json: JSON.stringify({
+      sorted: { source: "heuristic", upgrade: "pending" },
+      act: {
+        status: "done",
+        type: "spec",
+        source: "pending",
+        upgrade: "pending",
+        zipUrl: "/artifacts/2069736449902027136/loop-engineering.zip",
+      },
+    }),
+  });
+
+  failStuckSaves(db);
+  const settled = getSave(db, row.id);
+  const action = JSON.parse(settled.action_result_json);
+  assert.equal(settled.status, "done");
+  assert.equal(action.act.source, "template");
+  assert.equal(action.act.upgrade, null);
+  assert.equal(action.sorted.upgrade, null);
+  assert.equal(action.act.zipUrl, "/artifacts/2069736449902027136/loop-engineering.zip");
+  assert.doesNotMatch(renderDetail(settled), /location\.reload/);
+  db.close();
+});
+
+test("a failed rerun does not restore a pending paper spec", async () => {
+  const db = openDb(":memory:");
+  const row = createSave(db, "https://x.com/nobody/status/999");
+  updateSave(db, row.id, {
+    status: "done",
+    kind: "paper",
+    summary: "kept",
+    why_you: "A paper to read against your social-data recommender.",
+    why_you_source: "template",
+    action_result_json: JSON.stringify({
+      sorted: { source: "heuristic" },
+      act: { status: "done", type: "spec", source: "pending", zipUrl: "/artifacts/abc/paper-starter.zip" },
+    }),
+  });
+
+  const again = await runPipeline(db, row.id, {
+    offline: true,
+    llm: { apiKey: "" },
+    fetchImpl: async () => {
+      throw new Error("down");
+    },
+  });
+  assert.equal(again.status, "done");
+  assert.equal(JSON.parse(again.action_result_json).act.source, "template");
+  assert.equal(JSON.parse(again.action_result_json).act.zipUrl, "/artifacts/abc/paper-starter.zip");
+  assert.doesNotMatch(renderDetail(again), /location\.reload/);
+  db.close();
+});
+
+test("a failed rerun does not restore a pending why_you", async () => {
+  const db = openDb(":memory:");
+  const row = createSave(db, "https://x.com/nobody/status/999");
+  updateSave(db, row.id, {
+    status: "done",
+    kind: "idea",
+    summary: "kept",
+    why_you: "A template line for the idea.",
+    why_you_source: "pending",
+    action_result_json: JSON.stringify({ sorted: { source: "heuristic" }, act: { status: "skipped" } }),
+  });
+
+  const again = await runPipeline(db, row.id, {
+    offline: true,
+    llm: { apiKey: "" },
+    fetchImpl: async () => {
+      throw new Error("down");
+    },
+  });
+  assert.equal(again.status, "done");
+  assert.equal(again.why_you, "A template line for the idea.");
+  assert.equal(again.why_you_source, "template");
+  assert.doesNotMatch(renderDetail(again), /location\.reload/);
+  db.close();
+});
+
 test("pasting the same link twice returns the existing card", async (t) => {
   const db = openDb(":memory:");
   const app = createApp(db, { offline: true, env: {} });
@@ -195,8 +318,17 @@ test("a slow Grok call saves the heuristic first and the live refresh does not c
       return liveScrapling(url);
     },
     llmFetch: async (_url, init) => {
-      grokCalls += 1;
       const body = JSON.parse(init.body);
+      if (!body.response_format) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: "Scrapling fits the scrape you already run for product picks." } }],
+          }),
+        };
+      }
+      grokCalls += 1;
       assert.equal(body.reasoning_effort, "low");
       assert.equal(body.temperature, 0);
       assert.deepEqual(body.response_format, { type: "json_object" });

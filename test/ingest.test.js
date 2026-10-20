@@ -82,7 +82,8 @@ test("live ingest keeps an author self-reply and expands its t.co link", async (
     throw new Error(`unexpected ${url}`);
   };
 
-  const post = await ingest("https://x.com/hasantoxr/status/111", { fetchImpl, fixturesDir });
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "saves-live-"));
+  const post = await ingest("https://x.com/hasantoxr/status/111", { fetchImpl, fixturesDir, cacheDir });
   assert.match(combinedText(post), /https:\/\/github\.com\/D4Vinci\/Scrapling/);
   assert.equal(
     post.links.some((link) => link.expanded === "https://github.com/D4Vinci/Scrapling"),

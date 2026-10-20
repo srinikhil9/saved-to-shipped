@@ -1,6 +1,9 @@
+import { renderFileList, renderZipLink } from "./act/snippet.js";
+import { extractProducts } from "./runner/quickstart.js";
+
 const KINDS = ["repo", "tool", "paper", "idea", "event", "other"];
 
-export function renderFeed(saves) {
+export function renderFeed(saves, profileState = {}) {
   const pending = saves.some((save) => needsRefresh(save));
   return layout({
     title: "Saved to Shipped",
@@ -9,7 +12,8 @@ export function renderFeed(saves) {
         <div>
           <p class="brand">Saved to Shipped</p>
           <h1>Save it. Ship it.</h1>
-          <p class="lede">Paste a public X post. It lands in the feed, then gets sorted into a repo, paper, idea, tool, or event.</p>
+          <p class="lede">Paste a public X post. It lands in the feed, then gets sorted into a repo, paper, idea, tool, or event. A paper or an idea comes back as a spec and a starter zip.</p>
+          ${profileBadge(profileState)}
         </div>
       </header>
       <form class="paste" method="post" action="/api/saves">
@@ -49,11 +53,22 @@ export function renderFeed(saves) {
         async function refresh() {
           const response = await fetch("/feed/cards");
           cards.innerHTML = await response.text();
-          const stillPending = cards.querySelector("[data-status='queued'], [data-status='sorting'], [data-status='acting'], [data-upgrade='pending']");
+          const stillPending = cards.querySelector("[data-status='queued'], [data-status='sorting'], [data-status='acting'], [data-upgrade='pending'], [data-why='pending']");
           cards.dataset.pending = stillPending ? "1" : "0";
           if (stillPending) setTimeout(refresh, 800);
         }
         if (cards.dataset.pending === "1") setTimeout(refresh, 800);
+        document.querySelectorAll("time[data-synced]").forEach((node) => {
+          const date = new Date(node.dateTime || node.getAttribute("data-synced"));
+          if (Number.isNaN(date.getTime())) return;
+          node.textContent = date.toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
+          });
+        });
       </script>
     `,
   });
@@ -78,6 +93,13 @@ export function renderDetail(save) {
   const details = action?.sorted?.details || {};
   const links = action?.sorted?.links || [];
   const act = action?.act;
+  const products = productsFromRun(act);
+  if (save.kind === "repo" && act && (products.length || act.snippet || act.duration_ms != null)) {
+    return layout({
+      title: save.author ? `${save.author} · Saved to Shipped` : "Save · Saved to Shipped",
+      body: renderRepoDetail(save, action, details, links, act, products),
+    });
+  }
   return layout({
     title: save.author ? `${save.author} · Saved to Shipped` : "Save · Saved to Shipped",
     body: `
@@ -89,6 +111,7 @@ export function renderDetail(save) {
         </div>
         <h1>${escapeHtml(save.author || save.url)}</h1>
         ${save.summary ? `<p class="summary">${escapeHtml(save.summary)}</p>` : ""}
+        ${renderZipLink(act)}
         <p class="source"><a href="${escapeHtml(save.url)}">${escapeHtml(save.url)}</a></p>
         ${save.text ? `<pre class="post">${escapeHtml(save.text)}</pre>` : ""}
         ${action?.sorted?.reply_text ? `<h2>Also in the thread</h2><pre class="post">${escapeHtml(action.sorted.reply_text)}</pre>` : ""}
@@ -102,7 +125,7 @@ export function renderDetail(save) {
           ${detailRow("Sorted by", action?.sorted?.source)}
         </dl>
         ${renderLinks(links)}
-        ${save.why_you ? `<h2>Why you</h2><p>${escapeHtml(save.why_you)}</p>` : ""}
+        ${save.why_you ? `<h2>Why you</h2><p class="why">${escapeHtml(save.why_you)}</p>` : ""}
         <h2>Show last run</h2>
         <div class="last-run">
           ${renderLastRun(save, act)}
@@ -117,17 +140,146 @@ export function renderDetail(save) {
   });
 }
 
+function renderRepoDetail(save, action, details, links, act, products) {
+  const works = verdictLine(act);
+  const snippet = String(act.snippet || "").replace(/\s+$/, "");
+  const next = nextStep(act, details);
+  return `
+      <p class="back"><a href="/">← Feed</a></p>
+      <article class="detail lead">
+        <div class="meta">
+          ${save.kind ? badge(save.kind) : ""}
+          ${statusPill(save.status)}
+        </div>
+        <h1>${escapeHtml(save.author || save.url)}</h1>
+        <section class="verdict" id="verdict">
+          <p class="works">${escapeHtml(works)}</p>
+          ${save.why_you ? `<p class="why"><span class="k">Why you</span> ${escapeHtml(save.why_you)}</p>` : ""}
+          ${snippet ? `<pre class="snippet">${escapeHtml(snippet)}</pre>` : ""}
+          <p class="next"><span class="k">Next step</span> ${escapeHtml(next)}</p>
+        </section>
+        <p class="run-label">Show last run</p>
+        ${renderProductTable(products)}
+        ${save.screenshot_path ? `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">` : ""}
+        <details class="more">
+          <summary>Details</summary>
+          ${save.summary ? `<p class="summary">${escapeHtml(save.summary)}</p>` : ""}
+          <p class="source"><a href="${escapeHtml(save.url)}">${escapeHtml(save.url)}</a></p>
+          ${save.text ? `<pre class="post">${escapeHtml(save.text)}</pre>` : ""}
+          ${action?.sorted?.reply_text ? `<h2>Also in the thread</h2><pre class="post">${escapeHtml(action.sorted.reply_text)}</pre>` : ""}
+          <h2>Sorted</h2>
+          <dl class="details">
+            ${detailRow("Kind", save.kind)}
+            ${detailRow("Repo", details.repo_url)}
+            ${detailRow("Paper", details.paper_url)}
+            ${detailRow("Tool", details.tool_url)}
+            ${detailRow("Date", details.date)}
+            ${detailRow("Sorted by", action?.sorted?.source)}
+          </dl>
+          ${renderLinks(links)}
+          <div class="last-run">
+            ${renderLastRun(save, act, { screenshot: false })}
+          </div>
+        </details>
+        ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
+        ${needsRefresh(save) ? `<script>setTimeout(function () { location.reload(); }, 800);</script>` : ""}
+        <form method="post" action="/api/saves/${save.id}/rerun">
+          <button type="submit">Run again</button>
+        </form>
+      </article>
+    `;
+}
+
+function renderProductTable(products) {
+  if (!products.length) return `<p class="empty">No products in this run.</p>`;
+  return `
+    <table class="products">
+      <thead>
+        <tr><th>Product</th><th>One-liner</th><th>URL</th></tr>
+      </thead>
+      <tbody>
+        ${products
+          .map((product) => {
+            const href = safeHref(product.url);
+            const urlCell = href
+              ? `<a href="${escapeHtml(href)}">${escapeHtml(href)}</a>`
+              : escapeHtml(product.url);
+            return `<tr><td class="name">${escapeHtml(product.name)}</td><td>${escapeHtml(product.one_liner)}</td><td class="url">${urlCell}</td></tr>`;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function productsFromRun(act) {
+  const parsed = extractProducts(act?.stdout);
+  if (parsed.length) return parsed;
+  if (!Array.isArray(act?.products)) return [];
+  return act.products
+    .filter((product) => product && product.name && product.one_liner && product.url)
+    .slice(0, 10);
+}
+
+function formatRunSeconds(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return `${(n / 1000).toFixed(1)}s`;
+}
+
+function verdictLine(act) {
+  const wall = formatRunSeconds(act?.duration_ms);
+  const scrape = formatRunSeconds(act?.run_duration_ms);
+  if (act?.timed_out === true) {
+    return `Timed out after ${wall || scrape || "the budget"}`;
+  }
+  if (act?.exit_code !== 0) {
+    if (act?.exit_code == null) return "No finished run";
+    return installFailed(act) ? "Failed at install" : "Failed";
+  }
+  const runtime = act?.python ? ` (Python ${act.python})` : "";
+  return `Works: ${timingClause(wall, scrape)}${runtime}`;
+}
+
+function timingClause(wall, scrape) {
+  if (wall && scrape && wall !== scrape) return `installed and ran in ${wall} (scrape ${scrape})`;
+  if (wall) return `installed and ran in ${wall}`;
+  if (scrape) return `installed and ran (scrape ${scrape})`;
+  return "installed and ran";
+}
+
+function installFailed(act) {
+  if (act?.install_stderr) return true;
+  const commands = Array.isArray(act?.commands) ? act.commands : [];
+  return commands.some((command) => {
+    const cmd = String(command?.cmd || "");
+    return command?.exit_code && /pip |npm |pnpm |yarn |venv|install/.test(cmd);
+  });
+}
+
+function nextStep(act, details) {
+  const repoUrl = act?.repo || details?.repo_url || "";
+  const name = String(repoUrl).split("/").filter(Boolean).pop()?.replace(/\.git$/, "") || "";
+  if (act?.snippet && name) return `Run the snippet above in ${name}`;
+  if (act?.snippet) return "Run the snippet from this save";
+  if (name) return `Clone ${name} and try its quickstart`;
+  return "Try the quickstart from this save";
+}
+
 function renderCard(save) {
   const action = parseAction(save);
   const repo = action?.sorted?.details?.repo_url;
   return `
-    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}"${upgradeAttr(save)}>
+    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}" data-why="${save.why_you_source === "pending" ? "pending" : ""}"${upgradeAttr(save)}>
       <div class="meta">
         ${save.kind ? badge(save.kind) : `<span class="badge other">Unsorted</span>`}
         ${statusPill(save.status)}
       </div>
       <h2><a href="/saves/${save.id}">${escapeHtml(cardTitle(save))}</a></h2>
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
+      ${save.why_you ? `<p class="why">${escapeHtml(save.why_you)}</p>` : ""}
+      ${action?.act?.zipUrl ? `<p class="action-summary">${escapeHtml(action.act.summary || "")}</p>` : ""}
+      ${renderZipLink(action?.act)}
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
       ${action?.act?.status === "cached" ? `<span class="badge other">cached</span>` : ""}
       ${action?.act?.fallback_note ? `<p class="repo">${escapeHtml(action.act.fallback_note)}</p>` : ""}
@@ -139,7 +291,15 @@ function renderCard(save) {
   `;
 }
 
-function renderLastRun(save, act) {
+function renderLastRun(save, act, options = {}) {
+  if (act?.zipUrl) {
+    return `
+      <p>${escapeHtml(act.summary || "Spec and starter are ready.")}</p>
+      ${renderZipLink(act)}
+      ${renderFileList(act.files)}
+      <p class="note">${act.cached ? "Cached on disk. Run again reuses this zip." : "Written just now. The next run reuses this zip."}</p>
+    `;
+  }
   const sample = Array.isArray(act?.extracted_sample) ? act.extracted_sample : [];
   const parts = [];
   if (act?.status === "cached") parts.push(`<p class="badge other">cached</p>`);
@@ -162,7 +322,7 @@ function renderLastRun(save, act) {
   if (sample.length) {
     parts.push(`<ul class="sample">${sample.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`);
   }
-  if (save.screenshot_path) {
+  if (save.screenshot_path && options.screenshot !== false) {
     parts.push(`<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">`);
   }
   if (act?.stdout) {
@@ -224,10 +384,22 @@ function layout({ title, body }) {
       font: 17px/1.5 "Avenir Next", "Segoe UI", sans-serif;
     }
     a { color: var(--accent); }
-    .wrap { max-width: 820px; margin: 0 auto; padding: 32px 20px 64px; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 16px 20px 48px; }
+    .back { margin: 0 0 8px; }
     .brand { margin: 0; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; color: var(--accent); font-weight: 700; }
+    .profile-badge {
+      display: inline-block;
+      margin: 10px 0 0;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: #eeeae3;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
     h1 { font-family: Palatino, "Iowan Old Style", Georgia, serif; font-size: 42px; line-height: 1.05; margin: 6px 0 8px; }
     .lede, .summary { color: var(--muted); }
+    .why { margin: 8px 0 0; }
     .paste, .card, .detail, .last-run {
       background: var(--card);
       border: 1px solid var(--line);
@@ -280,7 +452,11 @@ function layout({ title, body }) {
     .status.acting { background: #f8edd8; color: var(--warn); }
     .status.done { background: #e5f4ea; color: var(--good); }
     .status.failed { background: #fde8e4; color: var(--bad); }
-    .repo { font-size: 14px; word-break: break-all; }
+    .repo, .artifact { font-size: 14px; word-break: break-all; }
+    .action-summary, .note { color: var(--muted); font-size: 15px; }
+    .artifact a { font-weight: 700; }
+    .files { margin: 8px 0 0; padding-left: 18px; }
+    .files code { font-size: 14px; }
     .empty { color: var(--muted); }
     .post {
       white-space: pre-wrap;
@@ -298,6 +474,36 @@ function layout({ title, body }) {
     .shot { max-width: 100%; border-radius: 12px; margin-top: 10px; display: block; }
     .sample { margin: 8px 0 4px; padding-left: 18px; }
     .last-run h3 { margin: 14px 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+    .detail.lead { padding: 10px 14px 12px; }
+    .detail.lead h1 { font-size: 26px; margin: 0 0 6px; }
+    .verdict {
+      background: #f3faf6;
+      border: 1px solid #b7d7c4;
+      border-radius: 12px;
+      padding: 6px 12px 8px;
+      margin: 0 0 6px;
+    }
+    .verdict .works { margin: 0; font-weight: 700; color: var(--good); }
+    .verdict .why, .verdict .next { margin: 2px 0 0; }
+    .verdict .k { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-right: 6px; }
+    .snippet {
+      margin: 4px 0 0;
+      padding: 6px 8px;
+      font-size: 12px;
+      line-height: 1.25;
+      white-space: pre;
+      overflow: auto;
+    }
+    .run-label { margin: 0 0 2px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+    table.products { width: 100%; border-collapse: collapse; }
+    table.products th, table.products td { text-align: left; padding: 2px 10px 2px 0; vertical-align: baseline; }
+    table.products th { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+    table.products td { border-top: 1px solid var(--line); font-size: 14px; line-height: 1.2; }
+    table.products td.name { font-weight: 700; white-space: nowrap; }
+    table.products td.url { font-size: 13px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    details.more { margin-top: 12px; }
+    details.more summary { cursor: pointer; font-weight: 700; }
+    details.more .post { margin-top: 8px; }
     @media (max-width: 640px) {
       h1 { font-size: 34px; }
       .row { flex-direction: column; }
@@ -311,6 +517,14 @@ function layout({ title, body }) {
   </main>
 </body>
 </html>`;
+}
+
+function profileBadge(state) {
+  if (state?.source === "bot" && state.synced_at) {
+    const iso = escapeHtml(state.synced_at);
+    return `<p class="profile-badge" data-profile="bot">Profile from Grok Bot memory, synced <time data-synced="${iso}" datetime="${iso}"></time></p>`;
+  }
+  return `<p class="profile-badge" data-profile="default">Default profile</p>`;
 }
 
 function badge(kind) {
@@ -377,12 +591,14 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function isPending(status) {
-  return status === "queued" || status === "sorting" || status === "acting";
+function isPending(save) {
+  const status = typeof save === "string" ? save : save?.status;
+  if (status === "queued" || status === "sorting" || status === "acting") return true;
+  return save?.why_you_source === "pending";
 }
 
 function needsRefresh(save) {
-  return isPending(save.status) || upgradeOf(save) === "pending";
+  return isPending(save) || upgradeOf(save) === "pending";
 }
 
 function upgradeAttr(save) {

@@ -2,10 +2,13 @@ import { createSave, findSaveByUrl, getSave, openDb } from "../src/db.js";
 import { llmSettings, sanitizedEnv } from "../src/env.js";
 import { listFixturePosts } from "../src/ingest.js";
 import { paths } from "../src/paths.js";
+import { resolveProfile } from "../src/profile.js";
 import { runPipeline } from "../src/pipeline.js";
+import { backfillWhyYou } from "../src/why.js";
 
 const offline = !process.argv.includes("--live");
 const db = openDb(process.env.DB_PATH || paths.db);
+const profile = resolveProfile(db).profile;
 const posts = listFixturePosts();
 
 if (!posts.length) {
@@ -23,12 +26,17 @@ for (const post of posts) {
   await runPipeline(db, row.id, {
     offline,
     awaitLive: !offline,
+    awaitWhy: !offline,
     llm: llmSettings(process.env),
     childEnv: sanitizedEnv(process.env),
+    profile,
   });
   const done = getSave(db, row.id);
   console.log(`#${done.id} ${done.status} ${done.kind || "-"} ${done.author || ""} ${post.url}`);
   if (done.error) console.log(`  error: ${done.error}`);
 }
+
+const filled = backfillWhyYou(db, profile);
+if (filled) console.log(`filled why_you on ${filled} existing save${filled === 1 ? "" : "s"}`);
 
 db.close();

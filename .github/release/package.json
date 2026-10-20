@@ -1,0 +1,7 @@
+{
+  "name": "saved-to-shipped-release-bot",
+  "private": true,
+  "scripts": {
+    "release-notes": "node release-notes.mjs"
+  }
+}

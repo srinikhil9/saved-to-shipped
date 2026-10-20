@@ -10,6 +10,7 @@ Requires Node.js 22 or newer. `.nvmrc` is `24` (the demo laptop is Node v24.14.0
 npm install
 npm test
 npm run prepare-python
+npm run act:demo
 npm run seed
 npm start
 ```
@@ -46,7 +47,7 @@ With no `XAI_API_KEY`, a regex/heuristic decides the kind: a `github.com/owner/r
 
 Set `XAI_API_KEY` to sort with Grok. The call goes to `https://api.x.ai/v1` and the default model is `grok-4.7` (`XAI_MODEL` overrides it). grok-4.7 accepts `reasoning_effort` (`low`, `medium`, `high`, `xhigh`; the default is `high`), `temperature` (0–2), and `response_format` `json_object`. This app sends `reasoning_effort: "low"`, `temperature: 0`, and `response_format: { "type": "json_object" }`, and gives the call 8 seconds. If the API rejects `reasoning_effort`, that field is dropped and the call is retried once.
 
-The regex result is saved on the card first. Grok replaces that result in place when it answers. A live refresh of the same save does not call Grok again. A failed or timed-out call leaves the regex result. The key is not passed into the child environment the repo runner will use.
+The regex result is saved on the card first. Grok replaces that result in place when it answers. A live refresh of the same save does not call Grok again. A failed or timed-out call leaves the regex result. The key is not passed into the child environment the repo runner will use. Paper and idea specs use that same client; see below.
 
 The detail page reloads on its own while a save is still running or a Grok upgrade is in flight. If the server stops during Run again, a card that already has a finished result comes back as that result. A first run that never finished is marked failed.
 
@@ -54,9 +55,9 @@ The detail page reloads on its own while a save is still running or a Grok upgra
 
 SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `sorting`, `acting`, `done`, `failed`), summary, why_you, action_result_json, screenshot_path, error.
 
-`data/profile.json` is Srinikhil's profile for the later "why you" step. `why_you` stays empty for now.
+`data/profile.json` is Srinikhil's profile. After a save is sorted, on either the Grok sort path or the no-key path, the pipeline writes a one-line `why_you` immediately: a short template per kind (`your social-data recommender`) plus keyword hits that cover the likely kinds for each seed (a scraping repo or tool, Loop Engineering as a paper or idea, the second brain as an idea, paper, or other). When `XAI_API_KEY` is set, Grok (`https://api.x.ai/v1`, `grok-4.7`, `reasoning_effort: low`, about 8 seconds) rewrites that line in the background from the profile and the post summary. The Grok line is stored on the row (`why_you_source` + profile hash) and reused offline, so a replay does not call again. No key, a timeout, or an error leaves the template. Empty rows that already have a kind are filled on startup, on seed, or on rerun. The line shows on the feed card and the detail page.
 
-`src/act.js` runs repos. Paper, idea, tool, and event actions are still stubs.
+`src/act.js` runs repos, and writes a spec plus a starter zip for papers and ideas. Tool and event actions are still stubs.
 
 ## Repo runner
 
@@ -65,7 +66,7 @@ For `kind=repo`, `actOnRepo` calls `runRepo({ saveId, repoUrl })` in `src/runner
 1. Clones the GitHub repo into a fresh temp directory (no Docker).
 2. Detects Python or JavaScript. Before creating a venv it reads `requires-python` and probes `python3.13` down through `python3` (including `/opt/homebrew/bin` and `/usr/local/bin` on macOS). Scrapling asks for `>=3.10`. Python 3.9 cannot install it (`cssselect>=1.5.0` has no 3.9 build), so a too-old interpreter is not used for pip.
 3. If nothing on the machine satisfies that specifier, the runner installs uv into `.tools/uv` (or reuses `uv` already on `PATH`) and runs `uv python install 3.12`, then `uv venv --python 3.12`. The interpreter and wheel cache stay in `.tools/` so a warm run fits the demo budget. uv is spawned with the same scrubbed environment as git and pip, plus `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` pointing at that cache. No secrets are copied in.
-4. Once a new enough interpreter exists, install tries `.[fetchers]`, then the base project (`.`), then `pip install scrapling` from PyPI. The step that succeeded is stored as `install_step`. Failed stderr tails are stored as `install_stderr` and shown on the card. The smoke script uses the base package only (`urllib` + `scrapling.Selector` on https://quotes.toscrape.com), not the browser fetchers.
+4. Once a new enough interpreter exists, install tries `.[fetchers]`, then the base project (`.`), then `pip install scrapling` from PyPI. The step that succeeded is stored as `install_step`. Failed stderr tails are stored as `install_stderr` and shown on the card. Other repos whose README imports `scrapling.fetchers` fall back to a base-package quotes smoke. Scrapling itself always runs the consumer-product scrape: `Fetcher.get` when that extra installed, otherwise `urllib` against https://yc-oss.github.io/api/tags/consumer.json. The YC directory page is a client-rendered shell, so the JSON endpoint is what the scrape reads.
 5. If uv still cannot provide 3.12, the card records `needs Python >=3.10, found 3.9.6` and replays the cached run.
 6. Kills the process tree if the run exceeds 90 seconds. Clone and install have separate ceilings, and each install step leaves time for the next one inside the demo budget.
 7. Builds a fresh allowlist for every child (`PATH`, `HOME` and `TMPDIR` set to the temp dir, `LANG`, plus pip/npm/uv settings). `spawn` never receives `process.env` or a spread of it. A parent `OPENAI_API_KEY`, `*_KEY`, or `*_TOKEN` is not visible in the child. `test/runner.test.js` dumps the child environment and checks that.
@@ -85,4 +86,16 @@ Regenerate the committed Scrapling cache after a real run:
 npm run seed:scrapling
 ```
 
-The detail page heading **Show last run** renders that cached screenshot and stdout with no further network.
+The detail page heading **Show last run** renders that cached screenshot and stdout with no further network. The Scrapling detail page leads with a verdict (how long the cached run took, the why-you line, the snippet, and a next step) and a table of those products. The post, the sorted-by note, and raw stdout sit in a collapsed Details section. Offline replay still uses the committed cache.
+
+## Paper and idea
+
+For those two kinds the act stage writes a one-page `SPEC.md` aimed at the startup in `data/profile.json`, plus a starter folder, and zips them. The feed card and the save page link the zip (`/artifacts/<status id>/<name>.zip`) and `SPEC.md`.
+
+- Loop Engineering (paper) → `loop/` with `schedule.mjs`, `discover.mjs`, `build.mjs`, and `verify.mjs`. The spec applies Schedule → Discover → Build → Verify → Repeat to the scrape → recommend pipeline, and notes that Saved to Shipped is the same loop.
+- Karpathy's second brain (idea) → `sources/`, `wiki/`, and `INSTRUCTIONS.md` (how an agent ingests a source into linked wiki pages). The wiki is seeded with an index, a product template, a founder template, and one example signal.
+- Any other paper or idea gets the same spec-plus-zip shape with a smaller `starter/` checklist.
+
+Committed seed zips live in `data/artifacts/<status id>/` and are only read. A rerun reuses them. `POST /api/saves/:id/rerun` with `{"force": true}` writes a fresh copy under `data/artifacts-runtime/` (gitignored) and the server prefers that copy. `npm run act:demo` runs both seeds with no API key. It drops any `data/artifacts-runtime/` copy of those seeds first, then reads the committed files, so an earlier Grok spec cannot change the result. The committed files stay untouched.
+
+The card is marked done from the template zip. When `XAI_API_KEY` is set, Grok then replaces `SPEC.md` in the background using `llmSettings` from `src/env.js` (`https://api.x.ai/v1`, `grok-4.7`, `XAI_MODEL` to override): `reasoning_effort: "low"`, an 8 second timeout, and one retry without that field if the API returns 400. No key, or any error, leaves the template. The repo runner still receives only the sanitized child environment, not the key.

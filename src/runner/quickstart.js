@@ -70,6 +70,62 @@ function extractQuickstart(readme, language) {
   return null;
 }
 
+const CONSUMER_PRODUCTS_URL = "https://yc-oss.github.io/api/tags/consumer.json";
+
+/**
+ * Scrapling snippet for the demo repo. YC's consumer directory page is an
+ * Inertia shell with no companies in the HTML; this public JSON is the
+ * directory filtered to Consumer, and Fetcher.get reads it directly.
+ */
+function consumerProductSmoke() {
+  return {
+    kind: "python",
+    source: "consumer-products",
+    code: `import json
+import urllib.request
+
+# Newest active companies on YC's public consumer list.
+# Fetcher when the extra is installed; urllib keeps the base package working.
+url = "${CONSUMER_PRODUCTS_URL}"
+try:
+    from scrapling.fetchers import Fetcher
+    rows = Fetcher.get(url).json()
+except Exception:
+    with urllib.request.urlopen(url, timeout=30) as response:
+        rows = json.loads(response.read().decode())
+active = [c for c in rows if c.get("status") == "Active" and c.get("website") and c.get("one_liner")]
+active.sort(key=lambda c: c.get("launched_at") or 0, reverse=True)
+products = [{"name": c["name"], "one_liner": c["one_liner"], "url": c["website"]} for c in active[:10]]
+print(json.dumps(products, indent=2))
+`,
+  };
+}
+
+function extractProducts(stdout) {
+  const text = String(stdout || "").trim();
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start === -1 || end <= start) return [];
+  let data;
+  try {
+    data = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(data)) return [];
+  const products = [];
+  for (const row of data) {
+    if (!row || typeof row !== "object") continue;
+    const name = String(row.name || "").replace(/\s+/g, " ").trim();
+    const oneLiner = String(row.one_liner || row.oneLiner || "").replace(/\s+/g, " ").trim();
+    const url = String(row.url || row.website || "").trim();
+    if (!name || !oneLiner || !/^https?:\/\//i.test(url)) continue;
+    products.push({ name, one_liner: oneLiner, url });
+    if (products.length >= 10) break;
+  }
+  return products;
+}
+
 function generatedPythonSmoke() {
   return {
     kind: 'python',
@@ -122,6 +178,9 @@ function pythonInstallSpec(optionalDeps, code) {
  * Pull a few human-readable items out of a scrape's stdout for the card.
  */
 function extractSample(stdout) {
+  const products = extractProducts(stdout);
+  if (products.length) return products.map((product) => product.one_liner).slice(0, 8);
+
   const text = String(stdout || "");
   const curly = [];
   const seen = new Set();
@@ -155,6 +214,8 @@ function extractSample(stdout) {
 
 export {
   extractQuickstart,
+  consumerProductSmoke,
+  extractProducts,
   generatedPythonSmoke,
   generatedJavaScriptSmoke,
   pythonInstallSpec,

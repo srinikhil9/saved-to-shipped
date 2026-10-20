@@ -1,0 +1,18 @@
+{
+  "generator": "step4-v1",
+  "profileHash": "60bb33ed35c9",
+  "type": "spec",
+  "status": "done",
+  "source": "template",
+  "summary": "A one-page spec for running scrape → recommend as Schedule, Discover, Build, Verify, plus a loop/ skeleton that writes each step to disk.",
+  "zipName": "loop-engineering.zip",
+  "files": [
+    "SPEC.md",
+    "loop/README.md",
+    "loop/schedule.mjs",
+    "loop/discover.mjs",
+    "loop/build.mjs",
+    "loop/verify.mjs",
+    "loop/state/.gitkeep"
+  ]
+}

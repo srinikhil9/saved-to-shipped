@@ -1,3 +1,5 @@
+import { act as actOnIdea } from "./act/idea.js";
+import { act as actOnPaper } from "./act/paper.js";
 import { DEMO_RUN_BUDGET_MS } from "./limits.js";
 import { paths } from "./paths.js";
 import { asCachedReplay, lastGoodRun } from "./runner/fallback.js";
@@ -13,10 +15,14 @@ import { runRepo } from "./runner/runRepo.js";
  * not process.env. A missed screenshot is a warning. A failed or over-budget
  * live run keeps the row's own last good run. The committed fixture is only
  * used when that row has none.
+ * kind=paper and kind=idea replay a committed starter under data/artifacts/,
+ * or write a new one under data/artifacts-runtime/. The template zip is ready
+ * before Grok runs. `options.llm` may replace SPEC.md in the background.
  */
 export async function act(save, options = {}) {
   if (save.kind === "repo") return actOnRepo(save, options);
-  if (save.kind === "paper" || save.kind === "idea") return actOnWriteup(save);
+  if (save.kind === "paper") return actOnPaper(save, options);
+  if (save.kind === "idea") return actOnIdea(save, options);
   if (save.kind === "tool") return actOnTool(save);
   if (save.kind === "event") return actOnEvent(save);
   return {
@@ -101,13 +107,6 @@ export async function actOnRepo(save, options = {}) {
     stdout: result.stdout || "",
     screenshot_path: result.screenshot_path || null,
     repo_url: repoUrl,
-  };
-}
-
-async function actOnWriteup() {
-  return {
-    status: "skipped",
-    reason: "Paper and idea actions (a one-page spec and a starter folder) land in a later step.",
   };
 }
 

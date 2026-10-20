@@ -11,6 +11,8 @@ const COLUMNS = new Set([
   "status",
   "summary",
   "why_you",
+  "why_you_source",
+  "why_you_profile_hash",
   "action_result_json",
   "screenshot_path",
   "error",
@@ -33,12 +35,48 @@ export function openDb(dbPath = ":memory:") {
       status TEXT NOT NULL,
       summary TEXT,
       why_you TEXT,
+      why_you_source TEXT,
+      why_you_profile_hash TEXT,
       action_result_json TEXT,
       screenshot_path TEXT,
       error TEXT
     );
   `);
+  const have = new Set(db.prepare("PRAGMA table_info(saves)").all().map((column) => column.name));
+  if (!have.has("why_you_source")) db.exec("ALTER TABLE saves ADD COLUMN why_you_source TEXT");
+  if (!have.has("why_you_profile_hash")) db.exec("ALTER TABLE saves ADD COLUMN why_you_profile_hash TEXT");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bot_profile (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      payload_json TEXT NOT NULL,
+      synced_at TEXT NOT NULL
+    );
+  `);
   return db;
+}
+
+export function saveBotProfile(db, payload, syncedAt) {
+  db.prepare(
+    `INSERT INTO bot_profile (id, payload_json, synced_at)
+     VALUES (1, @payload_json, @synced_at)
+     ON CONFLICT(id) DO UPDATE SET
+       payload_json = excluded.payload_json,
+       synced_at = excluded.synced_at`,
+  ).run({ payload_json: JSON.stringify(payload), synced_at: syncedAt });
+}
+
+export function deleteBotProfile(db) {
+  db.prepare("DELETE FROM bot_profile WHERE id = 1").run();
+}
+
+export function readBotProfile(db) {
+  const row = db.prepare("SELECT payload_json, synced_at FROM bot_profile WHERE id = 1").get();
+  if (!row) return null;
+  try {
+    return { payload: JSON.parse(row.payload_json), synced_at: row.synced_at };
+  } catch {
+    return null;
+  }
 }
 
 export function createSave(db, url) {
@@ -108,10 +146,11 @@ export function failStuckSaves(db) {
       cleared += 1;
     }
   }
+  db.prepare("UPDATE saves SET why_you_source = 'template' WHERE why_you_source = 'pending'").run();
   return { failed, restored, cleared, total: stuck.length };
 }
 
-function withoutPendingUpgrade(json) {
+export function withoutPendingUpgrade(json) {
   if (!json) return json;
   let action;
   try {
@@ -119,8 +158,20 @@ function withoutPendingUpgrade(json) {
   } catch {
     return json;
   }
-  if (action?.sorted?.upgrade !== "pending") return json;
-  action.sorted.upgrade = null;
+  let changed = false;
+  if (action?.sorted?.upgrade === "pending") {
+    action.sorted.upgrade = null;
+    changed = true;
+  }
+  if (action?.act?.source === "pending") {
+    action.act.source = "template";
+    changed = true;
+  }
+  if (action?.act?.upgrade === "pending") {
+    action.act.upgrade = null;
+    changed = true;
+  }
+  if (!changed) return json;
   return JSON.stringify(action);
 }
 
@@ -144,6 +195,8 @@ export function publicSave(row) {
     status: row.status,
     summary: row.summary,
     why_you: row.why_you,
+    why_you_source: row.why_you_source,
+    why_you_profile_hash: row.why_you_profile_hash,
     action_result_json: action,
     screenshot_path: row.screenshot_path,
     error: row.error,

@@ -45,13 +45,23 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
     "https://drive.google.com/file/d/1qzKI4DKnyHRpXK1J3ATPqwaqLc0iNu-M/view?usp=sharing",
   );
   assert.equal(done[0].status, "done");
-  assert.equal(done[0].why_you, null);
+  assert.equal(
+    done[0].why_you,
+    "Drop-in for your social-data scraping pipeline: use it to pull user posts at scale for product recommendations.",
+  );
+  assert.equal(
+    done[1].why_you,
+    "A blueprint for running your scrape-and-recommend agents as a self-verifying loop; Saved to Shipped is one.",
+  );
+  assert.equal(
+    done[2].why_you,
+    "Turn your saved posts, founders, and YC/a16z products into a living wiki your recommender can draw on.",
+  );
   assert.equal(done[0].error, null);
   assert.equal(done[0].action_result_json.act.status, "cached");
   assert.equal(done[0].action_result_json.act.repo, "https://github.com/D4Vinci/Scrapling");
   assert.equal(done[0].screenshot_path, "/screenshots/scrapling-seed.png");
   assert.ok(done[0].action_result_json.act.extracted_sample.length >= 1);
-  assert.equal(done[1].action_result_json.act.status, "skipped");
   assert.equal(done[1].screenshot_path, null);
 
   const list = await fetch(`${base}/api/saves`).then((response) => response.json());
@@ -74,11 +84,16 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   assert.match(html, /data-kind="idea"/);
   assert.match(html, /Hasan Toor/);
   assert.match(html, /github\.com\/D4Vinci\/Scrapling/);
+  assert.match(html, /Drop-in for your social-data scraping pipeline/);
+  assert.match(html, /self-verifying loop/);
+  assert.match(html, /living wiki your recommender can draw on/);
 
   const detail = await fetch(`${base}/saves/${ids[0]}`);
   const detailHtml = await detail.text();
   assert.match(detailHtml, /Show last run/);
   assert.doesNotMatch(detailHtml, /location\.reload/);
+  assert.match(detailHtml, /Why you/);
+  assert.match(detailHtml, /social-data scraping pipeline/);
   assert.match(detailHtml, /scrapling-seed\.png/);
   assert.match(detailHtml, /id="stdout"/);
   const quote = done[0].action_result_json.act.extracted_sample[0].slice(0, 24);
@@ -87,6 +102,42 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   assert.equal(shot.status, 200);
   const png = Buffer.from(await shot.arrayBuffer());
   assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+
+  const paper = done[1];
+  const idea = done[2];
+  assert.equal(paper.action_result_json.act.status, "done");
+  assert.equal(paper.action_result_json.act.type, "spec");
+  assert.equal(paper.action_result_json.act.source, "template");
+  assert.equal(paper.action_result_json.act.cached, true);
+  assert.equal(paper.action_result_json.act.zipUrl, "/artifacts/2069736449902027136/loop-engineering.zip");
+  assert.equal(idea.action_result_json.act.type, "starter");
+  assert.equal(idea.action_result_json.act.zipUrl, "/artifacts/2069651792678510894/second-brain.zip");
+  assert.equal(idea.action_result_json.act.files.includes("INSTRUCTIONS.md"), true);
+  assert.match(html, /\/artifacts\/2069736449902027136\/loop-engineering\.zip/);
+  assert.match(html, /\/artifacts\/2069651792678510894\/second-brain\.zip/);
+  assert.doesNotMatch(html, /data-kind="repo"[\s\S]*Download starter/);
+
+  const paperPage = await fetch(`${base}/saves/${ids[1]}`);
+  const paperHtml = await paperPage.text();
+  assert.match(paperHtml, /Download starter/);
+  assert.match(paperHtml, /loop\/verify\.mjs/);
+  assert.match(paperHtml, /Saved to Shipped is this loop|Cached on disk/);
+
+  const ideaPage = await fetch(`${base}/saves/${ids[2]}`);
+  const ideaHtml = await ideaPage.text();
+  assert.match(ideaHtml, /wiki\/index\.md/);
+  assert.match(ideaHtml, /INSTRUCTIONS\.md/);
+
+  const zip = await fetch(`${base}/artifacts/2069736449902027136/loop-engineering.zip`);
+  assert.equal(zip.status, 200);
+  assert.match(zip.headers.get("content-type") || "", /zip/);
+  const bytes = Buffer.from(await zip.arrayBuffer());
+  assert.equal(bytes.subarray(0, 2).toString(), "PK");
+  const specPage = await fetch(`${base}/artifacts/2069651792678510894/SPEC.md`);
+  assert.equal(specPage.status, 200);
+  assert.match(await specPage.text(), /second brain/i);
+  const missingZip = await fetch(`${base}/artifacts/nope/missing.zip`);
+  assert.equal(missingZip.status, 404);
 
   const missing = await fetch(`${base}/api/saves/99999`);
   assert.equal(missing.status, 404);
