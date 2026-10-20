@@ -53,7 +53,7 @@ curl -s 'http://localhost:3000/api/digest?since=2026-10-13T00:00:00.000Z'
 
 `since` is optional and defaults to the last 7 days. It must be an ISO timestamp (`400` otherwise). Counts and the top list only include saves created at or after `since`.
 
-`tried` counts saves whose act stage produced a result (a repo run, a spec zip, or any other act payload). Ranking is deterministic keyword overlap with the active profile. It does not call a model.
+`tried` counts saves whose act stage really ran: a repo run, a spec, or a starter. Skipped kinds (tool, event, other) and saves with no act payload are not counted. Ranking is deterministic keyword overlap with the active profile. It does not call a model.
 
 ```json
 {
@@ -133,7 +133,7 @@ The profile is stored in SQLite. Digest ranking uses the pushed fields. `why_you
 }
 ```
 
-The feed badge reads `Profile from Grok Bot memory, synced Oct 20, 2026, 2:41 AM UTC` after a push, and `Default profile` otherwise. `synced_at` in the JSON stays an ISO timestamp.
+The feed badge reads `Profile from Grok Bot memory, synced <local time>` after a push, and `Default profile` otherwise. The page formats `synced_at` in the viewer's local timezone. The JSON value stays an ISO timestamp.
 
 ## Reset the profile
 

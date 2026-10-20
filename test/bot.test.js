@@ -149,6 +149,61 @@ test("digest counts the window, ranks by profile keywords, and writes the briefi
   db.close();
 });
 
+test("digest tried count ignores skipped and untouched saves", () => {
+  const now = new Date("2026-10-20T12:00:00.000Z");
+  const db = openDb(":memory:");
+  const add = (url, fields) =>
+    stamp(db, createSave(db, url), { created_at: "2026-10-19T12:00:00.000Z", status: "done", ...fields });
+  add("https://x.com/a/status/1", {
+    kind: "repo",
+    author: "Ran",
+    text: "Scrapling scrapes.",
+    action_result_json: JSON.stringify({ act: { status: "ok", exit_code: 0, duration_ms: 1200 } }),
+  });
+  add("https://x.com/a/status/2", {
+    kind: "paper",
+    author: "Paper",
+    text: "Loop Engineering.",
+    action_result_json: JSON.stringify({
+      act: { status: "done", type: "spec", zipUrl: "/artifacts/2/loop.zip" },
+    }),
+  });
+  add("https://x.com/a/status/3", {
+    kind: "idea",
+    author: "Idea",
+    text: "A living wiki.",
+    action_result_json: JSON.stringify({
+      act: { status: "done", type: "starter", zipUrl: "/artifacts/3/brain.zip" },
+    }),
+  });
+  add("https://x.com/a/status/4", {
+    kind: "tool",
+    author: "Tool",
+    text: "A tool.",
+    action_result_json: JSON.stringify({ act: { status: "skipped", reason: "Tool summaries land in a later step." } }),
+  });
+  add("https://x.com/a/status/5", {
+    kind: "event",
+    author: "Event",
+    text: "An event.",
+    action_result_json: JSON.stringify({ act: { status: "skipped", reason: "Calendar files land in a later step." } }),
+  });
+  add("https://x.com/a/status/6", {
+    kind: "other",
+    author: "Other",
+    text: "Something else.",
+    action_result_json: JSON.stringify({ act: { status: "skipped", reason: "Nothing to run for this kind yet." } }),
+  });
+  add("https://x.com/a/status/7", { kind: "other", author: "Quiet", text: "No act payload." });
+
+  const digest = buildDigest(db.prepare("SELECT * FROM saves").all(), profile, { now });
+  assert.equal(digest.saved, 7);
+  assert.equal(digest.tried, 3);
+  assert.match(digest.markdown, /^You saved 7, I tried 3, here are the 2 worth your time\n/);
+  assert.doesNotMatch(digest.markdown, /act skipped/);
+  db.close();
+});
+
 test("profile round-trip, badge, and why_you follow the pushed memory", async (t) => {
   const db = openDb(":memory:");
   const prior = updateSave(db, createSave(db, "https://x.com/someone/status/9").id, {
@@ -207,8 +262,10 @@ test("profile round-trip, badge, and why_you follow the pushed memory", async (t
 
   const feed = await fetch(`${base}/`).then((response) => response.text());
   assert.match(feed, /data-profile="bot"/);
-  assert.match(feed, /Profile from Grok Bot memory, synced [A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2} [AP]M UTC/);
-  assert.doesNotMatch(feed, /synced \d{4}-\d{2}-\d{2}T/);
+  assert.match(feed, new RegExp(`data-synced="${stored.synced_at}"`));
+  assert.match(feed, /toLocaleString\(undefined,/);
+  assert.doesNotMatch(feed, /timeZone:\s*"UTC"|getUTC/);
+  assert.doesNotMatch(feed, / AM UTC| PM UTC/);
   assert.doesNotMatch(feed, /Default profile/);
 
   const plain = await fetch(`${base}/api/profile`, {

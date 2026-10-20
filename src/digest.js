@@ -19,7 +19,7 @@ export function buildDigest(rows, profile = {}, options = {}) {
   if (!since) throw new Error("since must be an ISO timestamp");
   const picked = (rows || []).filter((row) => inWindow(row, since));
   const saved = picked.length;
-  const tried = picked.filter(hasActResult).length;
+  const tried = picked.filter((row) => actReallyRan(actOf(row))).length;
   const top = picked
     .map((row) => ({
       id: row.id,
@@ -44,12 +44,21 @@ export function buildDigest(rows, profile = {}, options = {}) {
 }
 
 export function hasActResult(row) {
-  const act = actOf(row);
-  return Boolean(act && typeof act === "object" && !Array.isArray(act) && Object.keys(act).length);
+  return actReallyRan(actOf(row));
+}
+
+/** A skipped stub, or a save with no act payload, did not run. */
+export function actReallyRan(act) {
+  if (!act || typeof act !== "object" || Array.isArray(act)) return false;
+  if (act.status === "skipped") return false;
+  if (act.zipUrl || act.type === "spec" || act.type === "starter") return true;
+  if (act.status === "ok" || act.status === "cached" || act.status === "done" || act.status === "failed") return true;
+  if (act.exit_code != null || act.stdout || act.duration_ms != null || act.run_duration_ms != null) return true;
+  return false;
 }
 
 export function actionLine(act, baseUrl = "") {
-  if (!act || typeof act !== "object") return "not tried yet";
+  if (!actReallyRan(act)) return "not tried yet";
   if (typeof act.zipUrl === "string" && act.zipUrl) return `spec zip ${absoluteUrl(act.zipUrl, baseUrl)}`;
   const ms = numberOrNull(act.duration_ms) ?? numberOrNull(act.run_duration_ms);
   const failed =

@@ -58,6 +58,17 @@ export function renderFeed(saves, profileState = {}) {
           if (stillPending) setTimeout(refresh, 800);
         }
         if (cards.dataset.pending === "1") setTimeout(refresh, 800);
+        document.querySelectorAll("time[data-synced]").forEach((node) => {
+          const date = new Date(node.dateTime || node.getAttribute("data-synced"));
+          if (Number.isNaN(date.getTime())) return;
+          node.textContent = date.toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
+          });
+        });
       </script>
     `,
   });
@@ -510,23 +521,10 @@ function layout({ title, body }) {
 
 function profileBadge(state) {
   if (state?.source === "bot" && state.synced_at) {
-    return `<p class="profile-badge" data-profile="bot">Profile from Grok Bot memory, synced ${escapeHtml(formatSyncedAt(state.synced_at))}</p>`;
+    const iso = escapeHtml(state.synced_at);
+    return `<p class="profile-badge" data-profile="bot">Profile from Grok Bot memory, synced <time data-synced="${iso}" datetime="${iso}"></time></p>`;
   }
   return `<p class="profile-badge" data-profile="default">Default profile</p>`;
-}
-
-function formatSyncedAt(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return String(iso || "");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const day = date.getUTCDate();
-  const month = months[date.getUTCMonth()];
-  const year = date.getUTCFullYear();
-  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-  const rawHour = date.getUTCHours();
-  const suffix = rawHour >= 12 ? "PM" : "AM";
-  const hour = rawHour % 12 || 12;
-  return `${month} ${day}, ${year}, ${hour}:${minutes} ${suffix} UTC`;
 }
 
 function badge(kind) {
