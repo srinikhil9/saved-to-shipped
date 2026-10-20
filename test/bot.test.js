@@ -263,9 +263,14 @@ test("profile round-trip, badge, and why_you follow the pushed memory", async (t
   const feed = await fetch(`${base}/`).then((response) => response.text());
   assert.match(feed, /data-profile="bot"/);
   assert.match(feed, new RegExp(`data-synced="${stored.synced_at}"`));
-  assert.match(feed, /toLocaleString\(undefined,/);
-  assert.doesNotMatch(feed, /timeZone:\s*"UTC"|getUTC/);
-  assert.doesNotMatch(feed, / AM UTC| PM UTC/);
+  const syncedText = feed.match(/<time\b[^>]*data-synced="[^"]+"[^>]*>([^<]*)<\/time>/);
+  assert.ok(syncedText);
+  assert.match(syncedText[1], /\S/);
+  assert.match(syncedText[1], /UTC/);
+  const script = feed.slice(feed.indexOf("<script>"), feed.indexOf("</script>"));
+  assert.match(script, /toLocaleString\(undefined,/);
+  assert.doesNotMatch(script, /timeZone:\s*"UTC"|getUTC/);
+  assert.doesNotMatch(script, / AM UTC| PM UTC/);
   assert.doesNotMatch(feed, /Default profile/);
 
   const plain = await fetch(`${base}/api/profile`, {

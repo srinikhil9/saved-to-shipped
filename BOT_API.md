@@ -133,7 +133,7 @@ The profile is stored in SQLite. Digest ranking uses the pushed fields. `why_you
 }
 ```
 
-The feed badge reads `Profile from Grok Bot memory, synced <local time>` after a push, and `Default profile` otherwise. The page formats `synced_at` in the viewer's local timezone. The JSON value stays an ISO timestamp.
+The feed badge reads `Profile from Grok Bot memory, synced <local time>` after a push, and `Default profile` otherwise. The `<time>` tag includes a UTC fallback so the sentence is readable with JavaScript off, and the page script replaces that text with the viewer's local time. The JSON value stays an ISO timestamp.
 
 ## Reset the profile
 
