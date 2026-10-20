@@ -339,6 +339,26 @@ test("the artifact server prefers a runtime file over the committed copy", async
   }
 });
 
+test("act:demo reads the committed seeds when runtime holds a grok spec", async () => {
+  const key = "2069736449902027136";
+  const committedZip = path.join(paths.artifacts, key, "loop-engineering.zip");
+  const before = fs.readFileSync(committedZip);
+  const runtimeDir = path.join(paths.artifactsRuntime, key);
+  fs.cpSync(path.join(paths.artifacts, key), runtimeDir, { recursive: true });
+  const manifest = JSON.parse(fs.readFileSync(path.join(runtimeDir, "manifest.json"), "utf8"));
+  manifest.source = "grok";
+  fs.writeFileSync(path.join(runtimeDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  fs.writeFileSync(path.join(runtimeDir, "SPEC.md"), "# SPEC from Grok\n\nSrinikhil runtime copy that the demo must ignore.\n");
+  try {
+    const { stdout } = await execFileAsync(process.execPath, ["scripts/act-demo.js"], { cwd: paths.root });
+    assert.match(stdout, /act:demo ok/);
+    assert.match(stdout, /source=template cached=true/);
+    assert.ok(before.equals(fs.readFileSync(committedZip)));
+  } finally {
+    fs.rmSync(runtimeDir, { recursive: true, force: true });
+  }
+});
+
 test("offline repo replays its cache and the zip link only accepts artifact paths", async () => {
   const replay = await act(
     {

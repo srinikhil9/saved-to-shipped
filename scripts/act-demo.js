@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
 import { act } from "../src/act.js";
+import { artifactKey } from "../src/act/starter.js";
 import { sampleSave } from "../src/act/sample.js";
 import { paths } from "../src/paths.js";
 
@@ -29,6 +30,9 @@ for (const seed of SEEDS) {
     failures.push(`${seed.url} classified as ${save.kind}, expected paper or idea`);
     continue;
   }
+  // A Grok rebuild under data/artifacts-runtime/ would otherwise win and fail
+  // this no-key check. The demo always reads the committed seed copies.
+  fs.rmSync(path.join(paths.artifactsRuntime, artifactKey(save)), { recursive: true, force: true });
   const result = await act(save, { env: {}, force });
   const label = `${save.kind} ${path.basename(path.dirname(result.zipPath))}`;
   console.log(`\n${label}  source=${result.source} cached=${result.cached}`);
