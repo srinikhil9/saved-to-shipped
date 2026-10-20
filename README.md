@@ -2,6 +2,8 @@
 
 Paste a public X post. It shows up in the feed as a card, then gets sorted: repo, paper, idea, tool, event, or other. A repo save is cloned, installed, and run. The detail page replays the last run from cache.
 
+Requires Node.js 22 or newer. `.nvmrc` is `24` (the demo laptop is Node v24.14.0). On that version `better-sqlite3` installs from a prebuilt binary.
+
 ## Run
 
 ```bash
@@ -21,31 +23,31 @@ Open http://localhost:3000 and paste one of the seed posts:
 
 `POST /api/saves/:id/rerun` (or **Run again** on the detail page) sorts the save again. Offline (`INGEST_OFFLINE=1` or `npm run seed`) replays the cache. A normal server run executes the repo.
 
-The card is saved as `queued` immediately. The page updates when ingest and sort finish.
+The card is saved as `queued` immediately. For a seed post, the saved copy is sorted right away and a live read updates the card if it comes back. Each outbound request times out after 3 seconds. The page script refreshes cards that are still in progress. Pasting a link that is already saved returns that card.
 
 ## Offline
 
-Live fetch tries, in order:
+Live fetch tries, in order, with no X API key:
 
-1. `https://api.fxtwitter.com/status/:id` (full note text, no API key)
+1. `https://api.fxtwitter.com/status/:id` (full note text)
 2. `https://cdn.syndication.twimg.com/tweet-result` (public syndication)
 3. `https://publish.twitter.com/oembed` (short text)
 
 `t.co` links are followed to their destination. If the post says the link is in a reply, the author's own reply on that post is read too. Scrapling's GitHub repo is in that first reply: https://github.com/D4Vinci/Scrapling
 
-If the live fetch fails, the matching file in `fixtures/` is used. Known fixtures also fill in links the live payload missed. `INGEST_OFFLINE=1` skips the network and uses fixtures only.
+A successful live read is written to `data/live-cache/` and reused when the network is down. The three files in `fixtures/` are the seed copies. `INGEST_OFFLINE=1` skips the network and uses the cache, then those fixtures. Run again keeps the previous card when a refetch fails.
 
 ## Sort
 
-With no keys, a regex/heuristic decides the kind: a `github.com/owner/repo` URL is a repo, an arXiv or `.pdf` URL (or an "N-page PDF") is a paper, and so on.
+With no `XAI_API_KEY`, a regex/heuristic decides the kind: a `github.com/owner/repo` URL is a repo, an arXiv or `.pdf` URL (or an "N-page PDF") is a paper, and so on.
 
-Set `LLM_API_KEY` to use an OpenAI-compatible chat endpoint instead. Optional: `LLM_BASE_URL` (default `https://api.openai.com/v1`) and `LLM_MODEL` (default `gpt-4o-mini`). A failed model call falls back to the heuristic.
+Set `XAI_API_KEY` to sort with Grok instead. The call goes to `https://api.x.ai/v1` and the default model is `grok-4.7`. Set `XAI_MODEL` to use a different Grok model. A failed model call falls back to the heuristic. The key is not passed into the child environment the repo runner will use.
 
 ## Data
 
 SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `sorting`, `acting`, `done`, `failed`), summary, why_you, action_result_json, screenshot_path, error.
 
-`data/profile.json` is Srinikhil's profile. After a save is sorted, the pipeline writes one `why_you` line from a template for that kind (repo, tool, paper, idea, event, other). A few keyword hits specialize it: a scraping repo, the Loop Engineering paper, and the second-brain idea. Rows that already have a kind and an empty `why_you` are filled when the app starts, on seed, or on rerun. The line shows on the feed card and the detail page.
+`data/profile.json` is Srinikhil's profile. After a save is sorted, on either the Grok sort path or the no-key path, the pipeline writes a one-line `why_you` immediately: a short template per kind (`your social-data recommender`) plus keyword hits that cover the likely kinds for each seed (a scraping repo or tool, Loop Engineering as a paper or idea, the second brain as an idea, paper, or other). When `XAI_API_KEY` is set, Grok (`https://api.x.ai/v1`, `grok-4.7`, `reasoning_effort: low`, about 8 seconds) rewrites that line in the background from the profile and the post summary. The Grok line is stored on the row (`why_you_source` + profile hash) and reused offline, so a replay does not call again. No key, a timeout, or an error leaves the template. Empty rows that already have a kind are filled on startup, on seed, or on rerun. The line shows on the feed card and the detail page.
 
 `src/act.js` runs repos. Paper, idea, tool, and event actions are still stubs.
 

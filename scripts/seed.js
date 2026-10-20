@@ -1,4 +1,5 @@
 import { createSave, findSaveByUrl, getSave, openDb } from "../src/db.js";
+import { llmSettings, sanitizedEnv } from "../src/env.js";
 import { listFixturePosts } from "../src/ingest.js";
 import { paths } from "../src/paths.js";
 import { loadProfile } from "../src/profile.js";
@@ -22,7 +23,14 @@ for (const post of posts) {
     continue;
   }
   const row = createSave(db, post.url);
-  await runPipeline(db, row.id, { offline, profile });
+  await runPipeline(db, row.id, {
+    offline,
+    awaitLive: !offline,
+    awaitWhy: !offline,
+    llm: llmSettings(process.env),
+    childEnv: sanitizedEnv(process.env),
+    profile,
+  });
   const done = getSave(db, row.id);
   console.log(`#${done.id} ${done.status} ${done.kind || "-"} ${done.author || ""} ${post.url}`);
   if (done.error) console.log(`  error: ${done.error}`);

@@ -1,6 +1,9 @@
 node_modules/
+.env
+.env.local
 data/*.sqlite
 data/*.sqlite-*
 data/*.sqlite-journal
 data/screenshots/
 data/pip-cache/
+data/live-cache/

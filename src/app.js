@@ -1,5 +1,6 @@
 import express from "express";
-import { createSave, getSave, listSaves, publicSave, updateSave } from "./db.js";
+import { createSave, findSaveByUrl, getSave, listSaves, publicSave, updateSave } from "./db.js";
+import { llmSettings, sanitizedEnv } from "./env.js";
 import { renderCards, renderDetail, renderFeed, renderNotFound } from "./html.js";
 import { paths } from "./paths.js";
 import { loadProfile } from "./profile.js";
@@ -8,9 +9,23 @@ import { backfillWhyYou } from "./why.js";
 import { parseXStatusUrl } from "./xurl.js";
 
 export function createApp(db, options = {}) {
+  const source = options.env ?? process.env;
   const profile = options.profile || loadProfile();
   backfillWhyYou(db, profile);
-  const pipelineOptions = { env: process.env, profile, ...options };
+  const pipelineOptions = {
+    offline: options.offline === true,
+    fetchImpl: options.fetchImpl,
+    fixturesDir: options.fixturesDir,
+    cacheDir: options.cacheDir,
+    awaitLive: options.awaitLive === true,
+    awaitWhy: options.awaitWhy === true,
+    llm: options.llm ?? llmSettings(source),
+    childEnv: options.childEnv ?? sanitizedEnv(source),
+    llmFetch: options.llmFetch,
+    whyFetch: options.whyFetch,
+    whyTimeoutMs: options.whyTimeoutMs,
+    profile,
+  };
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "32kb" }));
@@ -36,6 +51,11 @@ export function createApp(db, options = {}) {
     if (!parsed) {
       return sendError(req, res, 400, "Paste a public X post URL, like https://x.com/user/status/123");
     }
+    const existing = findSaveByUrl(db, parsed.url);
+    if (existing) {
+      if (wantsHtml(req)) return res.redirect(303, `/saves/${existing.id}`);
+      return res.status(200).json(publicSave(existing));
+    }
     const row = createSave(db, parsed.url);
     startPipeline(db, row.id, pipelineOptions);
     if (wantsHtml(req)) return res.redirect(303, "/");
@@ -57,15 +77,7 @@ export function createApp(db, options = {}) {
     if (!save) {
       return wantsHtml(req) ? res.redirect(303, "/") : res.status(404).json({ error: "Save not found" });
     }
-    const row = updateSave(db, save.id, {
-      status: "queued",
-      kind: null,
-      summary: null,
-      why_you: null,
-      error: null,
-      action_result_json: null,
-      screenshot_path: null,
-    });
+    const row = updateSave(db, save.id, { status: "queued", error: null });
     startPipeline(db, row.id, pipelineOptions);
     if (wantsHtml(req)) return res.redirect(303, `/saves/${row.id}`);
     res.json(publicSave(row));

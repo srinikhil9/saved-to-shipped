@@ -2,8 +2,9 @@
   "name": "Srinikhil",
   "summary": "Srinikhil is building a startup that scrapes users' social media data to recommend niche consumer products from YC / a16z startups.",
   "building": "a startup that scrapes users' social media data to recommend niche consumer products from YC / a16z startups",
-  "used_for": "whyYou() writes saves.why_you from this profile: one template per kind, plus the keyword lines below.",
+  "used_for": "Templates fill why_you immediately. Grok rewrites the line when XAI_API_KEY is set.",
   "why": {
+    "focus": "your social-data recommender",
     "pipeline": "social-data scraping pipeline",
     "use": "pull user posts at scale for product recommendations",
     "agents": "scrape-and-recommend agents",

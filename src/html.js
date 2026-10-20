@@ -1,10 +1,9 @@
 const KINDS = ["repo", "tool", "paper", "idea", "event", "other"];
 
 export function renderFeed(saves) {
-  const pending = saves.some((save) => isPending(save.status));
+  const pending = saves.some((save) => isPending(save));
   return layout({
     title: "Saved to Shipped",
-    pending,
     body: `
       <header class="top">
         <div>
@@ -50,7 +49,7 @@ export function renderFeed(saves) {
         async function refresh() {
           const response = await fetch("/feed/cards");
           cards.innerHTML = await response.text();
-          const stillPending = cards.querySelector("[data-status='queued'], [data-status='sorting'], [data-status='acting']");
+          const stillPending = cards.querySelector("[data-status='queued'], [data-status='sorting'], [data-status='acting'], [data-why='pending']");
           cards.dataset.pending = stillPending ? "1" : "0";
           if (stillPending) setTimeout(refresh, 800);
         }
@@ -70,7 +69,6 @@ export function renderCards(saves) {
 export function renderNotFound() {
   return layout({
     title: "Not found · Saved to Shipped",
-    pending: false,
     body: `<p class="back"><a href="/">← Feed</a></p><h1>That save does not exist.</h1>`,
   });
 }
@@ -82,7 +80,6 @@ export function renderDetail(save) {
   const act = action?.act;
   return layout({
     title: save.author ? `${save.author} · Saved to Shipped` : "Save · Saved to Shipped",
-    pending: isPending(save.status),
     body: `
       <p class="back"><a href="/">← Feed</a></p>
       <article class="detail">
@@ -111,6 +108,7 @@ export function renderDetail(save) {
           ${renderLastRun(save, act)}
         </div>
         ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
+        ${save.why_you_source === "pending" ? `<script>setTimeout(() => location.reload(), 800)</script>` : ""}
         <form method="post" action="/api/saves/${save.id}/rerun">
           <button type="submit">Run again</button>
         </form>
@@ -123,12 +121,12 @@ function renderCard(save) {
   const action = parseAction(save);
   const repo = action?.sorted?.details?.repo_url;
   return `
-    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}">
+    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}" data-why="${save.why_you_source === "pending" ? "pending" : ""}">
       <div class="meta">
         ${save.kind ? badge(save.kind) : `<span class="badge other">Unsorted</span>`}
         ${statusPill(save.status)}
       </div>
-      <h2><a href="/saves/${save.id}">${escapeHtml(save.author || "Fetching post")}</a></h2>
+      <h2><a href="/saves/${save.id}">${escapeHtml(cardTitle(save))}</a></h2>
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
       ${save.why_you ? `<p class="why">${escapeHtml(save.why_you)}</p>` : ""}
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
@@ -181,14 +179,19 @@ function renderLinks(links) {
   `;
 }
 
-function layout({ title, body, pending }) {
+function cardTitle(save) {
+  if (save.author) return save.author;
+  if (save.status === "failed") return "Couldn't read this post";
+  return "Fetching post";
+}
+
+function layout({ title, body }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
-  ${pending ? `<meta http-equiv="refresh" content="2">` : ""}
   <style>
     :root {
       color-scheme: light;
@@ -351,6 +354,8 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function isPending(status) {
-  return status === "queued" || status === "sorting" || status === "acting";
+function isPending(save) {
+  const status = typeof save === "string" ? save : save?.status;
+  if (status === "queued" || status === "sorting" || status === "acting") return true;
+  return save?.why_you_source === "pending";
 }
