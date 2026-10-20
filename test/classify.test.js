@@ -53,34 +53,48 @@ test("regex fallback: github repo, arxiv paper, event, and a plain idea", () => 
   assert.equal(idea.kind, "idea");
 });
 
-test("an LLM response is used only when LLM_API_KEY is set, and a bad response falls back", async () => {
+test("Grok is used only when XAI_API_KEY is set, and a bad response falls back", async () => {
   const input = { text: "A simple idea about notes.", links: [] };
-  const llmFetch = async () => ({
-    ok: true,
-    json: async () => ({
-      choices: [
-        {
-          message: {
-            content: JSON.stringify({
-              kind: "event",
-              summary: "A dated meetup.",
-              repo_url: null,
-              paper_url: null,
-              tool_url: null,
-              date: "May 2, 2026",
-            }),
+  let requested = null;
+  const llmFetch = async (url, init) => {
+    requested = { url, body: JSON.parse(init.body) };
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                kind: "event",
+                summary: "A dated meetup.",
+                repo_url: null,
+                paper_url: null,
+                tool_url: null,
+                date: "May 2, 2026",
+              }),
+            },
           },
-        },
-      ],
-    }),
-  });
+        ],
+      }),
+    };
+  };
   const withKey = await classify(input, {
-    env: { LLM_API_KEY: "test-key", LLM_BASE_URL: "https://llm.test/v1", LLM_MODEL: "test" },
+    env: { XAI_API_KEY: "test-key" },
     fetchImpl: llmFetch,
   });
   assert.equal(withKey.source, "llm");
   assert.equal(withKey.kind, "event");
   assert.equal(withKey.details.date, "May 2, 2026");
+  assert.equal(requested.url, "https://api.x.ai/v1/chat/completions");
+  assert.equal(requested.body.model, "grok-4.7");
+
+  requested = null;
+  const override = await classify(input, {
+    env: { XAI_API_KEY: "test-key", XAI_MODEL: "grok-4" },
+    fetchImpl: llmFetch,
+  });
+  assert.equal(override.source, "llm");
+  assert.equal(requested.body.model, "grok-4");
 
   const withoutKey = await classify(input, { env: {}, fetchImpl: llmFetch });
   assert.equal(withoutKey.source, "heuristic");
@@ -89,7 +103,7 @@ test("an LLM response is used only when LLM_API_KEY is set, and a bad response f
   const broken = await classify(
     { text: "Ship https://github.com/D4Vinci/Scrapling", links: [] },
     {
-      env: { LLM_API_KEY: "test-key", LLM_BASE_URL: "https://llm.test/v1" },
+      env: { XAI_API_KEY: "test-key" },
       fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "nope" } }] }) }),
     },
   );

@@ -63,6 +63,7 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   assert.equal(feed.status, 200);
   const html = await feed.text();
   assert.match(html, /Save it\. Ship it\./);
+  assert.doesNotMatch(html, /http-equiv="refresh"/);
   assert.match(html, /data-kind="repo"/);
   assert.match(html, /data-kind="paper"/);
   assert.match(html, /data-kind="idea"/);

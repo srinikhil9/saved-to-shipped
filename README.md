@@ -2,14 +2,19 @@
 
 Paste a public X post. It shows up in the feed as a card, then gets sorted: repo, paper, idea, tool, event, or other. A repo save is cloned, installed, and run. The detail page replays the last run from cache.
 
+Requires Node.js 22 or newer. `.nvmrc` is `24` (the demo laptop is Node v24.14.0). On that version `better-sqlite3` installs from a prebuilt binary.
+
 ## Run
 
 ```bash
 npm install
 npm test
+npm run prepare-python
 npm run seed
 npm start
 ```
+
+`npm run prepare-python` is optional on a machine that already has Python 3.10 or newer. On the demo Mac, whose only interpreter is `/usr/bin/python3` (3.9.6), run it once before a live demo. It installs [uv](https://docs.astral.sh/uv/) into `.tools/` with the official standalone installer (no sudo, no Homebrew) and caches CPython 3.12 plus the Scrapling wheels. Later live runs reuse that cache. `INGEST_OFFLINE=1` makes this command a no-op: it does not download or provision.
 
 Open http://localhost:3000 and paste one of the seed posts:
 
@@ -19,27 +24,27 @@ Open http://localhost:3000 and paste one of the seed posts:
 
 `npm run seed` loads those three fixtures into `data/saves.sqlite` through the same pipeline. It does not call the network. The Scrapling card replays a committed run (`fixtures/repo-runs/scrapling/`: stdout, screenshot, and JSON) so the detail page works offline. Pass `--live` to fetch the post from the network and actually clone and run the repo.
 
-`POST /api/saves/:id/rerun` (or **Run again** on the detail page) sorts the save again. Offline (`INGEST_OFFLINE=1` or `npm run seed`) replays the cache. A normal server run executes the repo.
+`POST /api/saves/:id/rerun` (or **Run again** on the detail page) sorts the save again. It does not clear the previous result first. Offline (`INGEST_OFFLINE=1` or `npm run seed`) replays the cache. A normal server run tries the repo, with a demo budget of 45 seconds (`DEMO_RUN_BUDGET_MS`). If that attempt fails or runs over the budget, the card stays on the last good run and says `showing last good run from <time>`. The failed attempt is kept on the act payload as `attempt_error` and does not replace stdout or the screenshot.
 
-The card is saved as `queued` immediately. The page updates when ingest and sort finish.
+The card is saved as `queued` immediately. For a seed post, the saved copy is sorted right away and a live read updates the card if it comes back. Each outbound request times out after 3 seconds. The page script refreshes cards that are still in progress. Pasting a link that is already saved returns that card.
 
 ## Offline
 
-Live fetch tries, in order:
+Live fetch tries, in order, with no X API key:
 
-1. `https://api.fxtwitter.com/status/:id` (full note text, no API key)
+1. `https://api.fxtwitter.com/status/:id` (full note text)
 2. `https://cdn.syndication.twimg.com/tweet-result` (public syndication)
 3. `https://publish.twitter.com/oembed` (short text)
 
 `t.co` links are followed to their destination. If the post says the link is in a reply, the author's own reply on that post is read too. Scrapling's GitHub repo is in that first reply: https://github.com/D4Vinci/Scrapling
 
-If the live fetch fails, the matching file in `fixtures/` is used. Known fixtures also fill in links the live payload missed. `INGEST_OFFLINE=1` skips the network and uses fixtures only.
+A successful live read is written to `data/live-cache/` and reused when the network is down. The three files in `fixtures/` are the seed copies. `INGEST_OFFLINE=1` skips the network and uses the cache, then those fixtures. It does not clone, pip-install, or provision Python. Run again keeps the previous card when a refetch fails.
 
 ## Sort
 
-With no keys, a regex/heuristic decides the kind: a `github.com/owner/repo` URL is a repo, an arXiv or `.pdf` URL (or an "N-page PDF") is a paper, and so on.
+With no `XAI_API_KEY`, a regex/heuristic decides the kind: a `github.com/owner/repo` URL is a repo, an arXiv or `.pdf` URL (or an "N-page PDF") is a paper, and so on.
 
-Set `LLM_API_KEY` to use an OpenAI-compatible chat endpoint instead. Optional: `LLM_BASE_URL` (default `https://api.openai.com/v1`) and `LLM_MODEL` (default `gpt-4o-mini`). A failed model call falls back to the heuristic.
+Set `XAI_API_KEY` to sort with Grok instead. The call goes to `https://api.x.ai/v1` and the default model is `grok-4.7`. Set `XAI_MODEL` to use a different Grok model. A failed model call falls back to the heuristic. The key is not passed into the child environment the repo runner will use.
 
 ## Data
 
@@ -54,13 +59,17 @@ SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `so
 For `kind=repo`, `actOnRepo` calls `runRepo({ saveId, repoUrl })` in `src/runner/`. It:
 
 1. Clones the GitHub repo into a fresh temp directory (no Docker).
-2. Detects Python or JavaScript and installs into a venv or local `node_modules`. Scrapling's README quickstart imports `scrapling.fetchers`, so the install includes that extra.
-3. Runs the README quickstart, or a generated script that scrapes https://quotes.toscrape.com.
-4. Kills the process tree if the run exceeds 90 seconds. Clone and install have separate ceilings.
-5. Builds a fresh allowlist for every child (`PATH`, `HOME` and `TMPDIR` set to the temp dir, `LANG`, plus pip/npm settings). `spawn` never receives `process.env` or a spread of it. A parent `OPENAI_API_KEY`, `*_KEY`, or `*_TOKEN` is not visible in the child. `test/runner.test.js` dumps the child environment and checks that.
-6. Writes a PNG of the terminal output (Chrome via Playwright) under `data/screenshots/` and stores stdout, the screenshot path, and `action_result_json` (repo, language, commands, exit code, duration, timestamp, extracted sample) on the save.
+2. Detects Python or JavaScript. Before creating a venv it reads `requires-python` and probes `python3.13` down through `python3` (including `/opt/homebrew/bin` and `/usr/local/bin` on macOS). Scrapling asks for `>=3.10`. Python 3.9 cannot install it (`cssselect>=1.5.0` has no 3.9 build), so a too-old interpreter is not used for pip.
+3. If nothing on the machine satisfies that specifier, the runner installs uv into `.tools/uv` (or reuses `uv` already on `PATH`) and runs `uv python install 3.12`, then `uv venv --python 3.12`. The interpreter and wheel cache stay in `.tools/` so a warm run fits the demo budget. uv is spawned with the same scrubbed environment as git and pip, plus `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` pointing at that cache. No secrets are copied in.
+4. Once a new enough interpreter exists, install tries `.[fetchers]`, then the base project (`.`), then `pip install scrapling` from PyPI. The step that succeeded is stored as `install_step`. Failed stderr tails are stored as `install_stderr` and shown on the card. The smoke script uses the base package only (`urllib` + `scrapling.Selector` on https://quotes.toscrape.com), not the browser fetchers.
+5. If uv still cannot provide 3.12, the card records `needs Python >=3.10, found 3.9.6` and replays the cached run.
+6. Kills the process tree if the run exceeds 90 seconds. Clone and install have separate ceilings, and each install step leaves time for the next one inside the demo budget.
+7. Builds a fresh allowlist for every child (`PATH`, `HOME` and `TMPDIR` set to the temp dir, `LANG`, plus pip/npm/uv settings). `spawn` never receives `process.env` or a spread of it. A parent `OPENAI_API_KEY`, `*_KEY`, or `*_TOKEN` is not visible in the child. `test/runner.test.js` dumps the child environment and checks that.
+8. Writes a PNG of the terminal output under `data/screenshots/`. The browser is `CHROME_PATH` if set, otherwise Chrome, Chromium, or Edge for the current OS (macOS looks in `/Applications/Google Chrome.app`), otherwise Playwright's Chrome channel. A screenshot failure is a warning: the card stays `done` and still stores stdout and `action_result_json`.
 
-Run one repo from the shell (needs `python3-venv`, network, and Chrome for the screenshot):
+The runner builds that child environment itself. It does not use `sanitizedEnv()` from `src/env.js`. That helper is what the app passes as `childEnv` for other steps; the repo processes never see it.
+
+Run one repo from the shell (network, and Chrome for the screenshot). `npm run prepare-python` first if the machine has no Python 3.10+:
 
 ```bash
 npm run run-repo -- https://github.com/D4Vinci/Scrapling

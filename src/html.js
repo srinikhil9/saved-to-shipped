@@ -4,7 +4,6 @@ export function renderFeed(saves) {
   const pending = saves.some((save) => isPending(save.status));
   return layout({
     title: "Saved to Shipped",
-    pending,
     body: `
       <header class="top">
         <div>
@@ -70,7 +69,6 @@ export function renderCards(saves) {
 export function renderNotFound() {
   return layout({
     title: "Not found · Saved to Shipped",
-    pending: false,
     body: `<p class="back"><a href="/">← Feed</a></p><h1>That save does not exist.</h1>`,
   });
 }
@@ -82,7 +80,6 @@ export function renderDetail(save) {
   const act = action?.act;
   return layout({
     title: save.author ? `${save.author} · Saved to Shipped` : "Save · Saved to Shipped",
-    pending: isPending(save.status),
     body: `
       <p class="back"><a href="/">← Feed</a></p>
       <article class="detail">
@@ -128,9 +125,13 @@ function renderCard(save) {
         ${save.kind ? badge(save.kind) : `<span class="badge other">Unsorted</span>`}
         ${statusPill(save.status)}
       </div>
-      <h2><a href="/saves/${save.id}">${escapeHtml(save.author || "Fetching post")}</a></h2>
+      <h2><a href="/saves/${save.id}">${escapeHtml(cardTitle(save))}</a></h2>
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
+      ${action?.act?.status === "cached" ? `<span class="badge other">cached</span>` : ""}
+      ${action?.act?.fallback_note ? `<p class="repo">${escapeHtml(action.act.fallback_note)}</p>` : ""}
+      ${action?.act?.attempt_error ? `<p class="error">${escapeHtml(clip(action.act.attempt_error))}</p>` : ""}
+      ${installNote(action?.act)}
       ${save.screenshot_path ? `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">` : ""}
       ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
     </article>
@@ -140,6 +141,14 @@ function renderCard(save) {
 function renderLastRun(save, act) {
   const sample = Array.isArray(act?.extracted_sample) ? act.extracted_sample : [];
   const parts = [];
+  if (act?.status === "cached") parts.push(`<p class="badge other">cached</p>`);
+  if (act?.fallback_note) parts.push(`<p class="repo">${escapeHtml(act.fallback_note)}</p>`);
+  if (act?.warning) parts.push(`<p class="repo">${escapeHtml(act.warning)}</p>`);
+  if (act?.attempt_error) parts.push(`<p class="error">${escapeHtml(act.attempt_error)}</p>`);
+  if (act?.install_step) parts.push(`<p class="repo">install ${escapeHtml(act.install_step)}</p>`);
+  if (act?.install_stderr && !String(act.attempt_error || "").includes(String(act.install_stderr).slice(0, 80))) {
+    parts.push(`<h3>install</h3><pre class="post">${escapeHtml(clip(act.install_stderr, 2000))}</pre>`);
+  }
   if (act && (save.screenshot_path || act.stdout)) {
     const bits = [
       act.language || "",
@@ -180,14 +189,19 @@ function renderLinks(links) {
   `;
 }
 
-function layout({ title, body, pending }) {
+function cardTitle(save) {
+  if (save.author) return save.author;
+  if (save.status === "failed") return "Couldn't read this post";
+  return "Fetching post";
+}
+
+function layout({ title, body }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
-  ${pending ? `<meta http-equiv="refresh" content="2">` : ""}
   <style>
     :root {
       color-scheme: light;
@@ -313,6 +327,19 @@ function detailRow(label, value) {
   const href = typeof value === "string" ? safeHref(value) : null;
   const shown = href ? `<a href="${escapeHtml(href)}">${escapeHtml(href)}</a>` : escapeHtml(String(value));
   return `<dt>${escapeHtml(label)}</dt><dd>${shown}</dd>`;
+}
+
+function clip(text, max = 600) {
+  const value = String(text || "");
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function installNote(act) {
+  if (!act?.install_stderr) return "";
+  const head = String(act.install_stderr).slice(0, 80);
+  if (act.attempt_error && String(act.attempt_error).includes(head)) return "";
+  return `<p class="error">${escapeHtml(clip(act.install_stderr))}</p>`;
 }
 
 function excerpt(text) {

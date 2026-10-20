@@ -22,6 +22,13 @@ export const ENV_ALLOWLIST = [
   "NPM_CONFIG_UPDATE_NOTIFIER",
   "NPM_CONFIG_FUND",
   "NPM_CONFIG_AUDIT",
+  "UV_INSTALL_DIR",
+  "UV_UNMANAGED_INSTALL",
+  "UV_CACHE_DIR",
+  "UV_PYTHON_INSTALL_DIR",
+  "UV_NO_MODIFY_PATH",
+  "UV_LINK_MODE",
+  "INSTALLER_NO_MODIFY_PATH",
 ];
 
 const ALLOWED = new Set(ENV_ALLOWLIST);
@@ -36,7 +43,7 @@ export const SECRET_ENV_NAME = /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDE
  * tool directories named on the parent PATH, and the standard system bins.
  * No other parent variable is copied.
  */
-export function allowlistedEnv({ home, pathPrefix, pipCacheDir, npmCacheDir } = {}) {
+export function allowlistedEnv({ home, pathPrefix, pipCacheDir, npmCacheDir, uv } = {}) {
   if (!home) throw new Error("allowlistedEnv requires a temp HOME");
   const env = {
     PATH: buildPath(pathPrefix),
@@ -55,6 +62,15 @@ export function allowlistedEnv({ home, pathPrefix, pipCacheDir, npmCacheDir } = 
   };
   if (pipCacheDir) env.PIP_CACHE_DIR = String(pipCacheDir);
   if (npmCacheDir) env.NPM_CONFIG_CACHE = String(npmCacheDir);
+  if (uv) {
+    env.UV_INSTALL_DIR = String(uv.uvBinDir);
+    env.UV_UNMANAGED_INSTALL = String(uv.uvBinDir);
+    env.UV_CACHE_DIR = String(uv.uvCache);
+    env.UV_PYTHON_INSTALL_DIR = String(uv.uvPython);
+    env.UV_NO_MODIFY_PATH = "1";
+    env.INSTALLER_NO_MODIFY_PATH = "1";
+    env.UV_LINK_MODE = "copy";
+  }
   return env;
 }
 

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { createApp } from "./app.js";
-import { openDb } from "./db.js";
+import { failStuckSaves, openDb } from "./db.js";
 import { paths } from "./paths.js";
 import { restoreCachedScreenshots } from "./runner/cache.js";
 
@@ -8,6 +8,8 @@ fs.mkdirSync(paths.screenshots, { recursive: true });
 restoreCachedScreenshots();
 
 const db = openDb(process.env.DB_PATH || paths.db);
+const interrupted = failStuckSaves(db);
+if (interrupted) console.log(`Marked ${interrupted} interrupted save${interrupted === 1 ? "" : "s"} as failed.`);
 const app = createApp(db, { offline: process.env.INGEST_OFFLINE === "1" });
 const port = Number(process.env.PORT || 3000);
 

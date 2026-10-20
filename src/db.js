@@ -72,6 +72,18 @@ export function listSaves(db) {
   return db.prepare("SELECT * FROM saves ORDER BY created_at DESC, id DESC").all();
 }
 
+const INTERRUPTED = "This save was interrupted when the server stopped. Run it again.";
+
+export function failStuckSaves(db) {
+  const stuck = db
+    .prepare(`SELECT id FROM saves WHERE status IN ('queued', 'sorting', 'acting')`)
+    .all();
+  for (const row of stuck) {
+    updateSave(db, row.id, { status: "failed", error: INTERRUPTED });
+  }
+  return stuck.length;
+}
+
 export function publicSave(row) {
   if (!row) return null;
   let action = null;
