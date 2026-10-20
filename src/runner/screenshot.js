@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { detectBrowser } from "./browser.js";
 import { allowlistedEnv } from "./env.js";
 
 function escapeHtml(value) {
@@ -129,8 +130,9 @@ function renderRunHtml(run) {
 async function screenshotRun(run, outPath) {
   const { chromium } = await import("playwright-core");
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  const found = detectBrowser();
   const browser = await chromium.launch({
-    executablePath: process.env.CHROME_PATH || "/usr/local/bin/google-chrome",
+    ...(found.executablePath ? { executablePath: found.executablePath } : { channel: found.channel || "chrome" }),
     env: allowlistedEnv({ home: os.tmpdir() }),
     args: ["--no-sandbox", "--disable-dev-shm-usage", "--hide-scrollbars", "--disable-gpu"],
   });

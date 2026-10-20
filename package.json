@@ -12,7 +12,8 @@
     "seed": "node scripts/seed.js",
     "test": "node --test",
     "run-repo": "node scripts/run-repo.js",
-    "seed:scrapling": "node scripts/seed-scrapling.js"
+    "seed:scrapling": "node scripts/seed-scrapling.js",
+    "prepare-python": "node scripts/prepare-python.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",

@@ -2,44 +2,45 @@ import { act } from "./act.js";
 import { classify } from "./classify.js";
 import { getSave, updateSave } from "./db.js";
 import { expandPostLinks } from "./expand.js";
-import { combinedText, ingest, readCachedPost, readSavedPost } from "./ingest.js";
+import { combinedText, ingest, readSavedPost } from "./ingest.js";
 import { loadProfile } from "./profile.js";
-import { parseXStatusUrl } from "./xurl.js";
+import { asCachedReplay } from "./runner/fallback.js";
+import { isOffline } from "./runner/python.js";
 import { refreshWhyYou, storeWhyLine } from "./why.js";
 
 /**
  * Stages for one save: ingest → sort → why_you → act.
- * A saved copy is sorted immediately. why_you is the template line first;
- * Grok may replace it in the background. A live read, when it succeeds,
- * updates the card and is cached for the next offline replay.
+ * A saved copy is sorted immediately from the committed repo run when one
+ * exists. why_you uses the real offline flag, so a fixture preview still
+ * asks Grok when X is down and XAI_API_KEY is set. A failed or over-budget
+ * live run keeps the last good result.
  */
 export async function runPipeline(db, id, options = {}) {
   const existing = getSave(db, id);
   if (!existing) return null;
   const snapshot = snapshotOf(existing);
+  const offline = options.offline === true || isOffline();
+  const opts = { ...options, offline };
   try {
     updateSave(db, id, { status: "sorting", error: null });
-    if (!options.offline) {
-      const saved = readSavedPost(existing.url, options);
+    if (!opts.offline && !opts.forceLive) {
+      const saved = readSavedPost(existing.url, opts);
       if (saved) {
-        const prepared = await expandPostLinks(saved, options.fetchImpl || globalThis.fetch);
-        // A fixture can paint the card before the live read returns. Replaying
-        // the committed repo cache keeps that paint fast; the live refresh
-        // runs the repo for real once the post is fetched.
-        const previewFromFixture = !hasLiveCache(existing.url, options);
-        const done = await storeSorted(
-          db,
-          id,
-          prepared,
-          previewFromFixture ? { ...options, offline: true } : options,
-        );
-        const pending = refreshFromLive(db, id, existing.url, options);
-        if (options.awaitLive) await pending;
+        const prepared = await expandPostLinks(saved, opts.fetchImpl || globalThis.fetch);
+        const done = await storeSorted(db, id, prepared, { ...opts, repoMode: "cache" }, snapshot);
+        const pending = refreshFromLive(db, id, existing.url, opts, snapshot);
+        if (opts.awaitLive) await pending;
         return done;
       }
     }
-    const post = await ingest(existing.url, options);
-    return await storeSorted(db, id, post, options);
+    const post = await ingest(existing.url, opts);
+    return await storeSorted(
+      db,
+      id,
+      post,
+      { ...opts, repoMode: opts.repoMode || (opts.offline ? "cache" : "live") },
+      snapshot,
+    );
   } catch (error) {
     if (snapshot.kind && snapshot.action_result_json) {
       return updateSave(db, id, {
@@ -63,7 +64,7 @@ export async function runPipeline(db, id, options = {}) {
   }
 }
 
-async function storeSorted(db, id, post, options) {
+async function storeSorted(db, id, post, options, snapshot) {
   const sorted = await classify(
     { text: combinedText(post), links: post.links || [] },
     { llm: options.llm, fetchImpl: options.llmFetch },
@@ -89,13 +90,38 @@ async function storeSorted(db, id, post, options) {
   const pendingWhy = refreshWhyYou(db, id, save, profile, options);
   const current = getSave(db, id);
   const action = await act(
-    { ...current, details: sorted.details },
-    { offline: options.offline === true, env: options.childEnv || {} },
+    { ...current, details: sorted.details, previous: snapshot },
+    {
+      offline: options.offline === true,
+      repoMode: options.repoMode,
+      demoBudgetMs: options.demoBudgetMs,
+      runRepo: options.runRepo,
+      screenshotDir: options.screenshotDir,
+    },
   );
   const failed = action?.status === "failed";
+  if (failed && snapshot?.kind && snapshot?.action_result_json) {
+    const preserved = preserveGood(snapshot, action.error);
+    const kept = updateSave(db, id, {
+      status: "done",
+      author: snapshot.author,
+      text: snapshot.text,
+      kind: snapshot.kind,
+      summary: snapshot.summary,
+      why_you: snapshot.why_you,
+      why_you_source: snapshot.why_you_source,
+      why_you_profile_hash: snapshot.why_you_profile_hash,
+      screenshot_path: preserved.screenshot_path,
+      action_result_json: preserved.json,
+      error: null,
+    });
+    if (options.awaitWhy) await pendingWhy;
+    return kept;
+  }
+  const screenshotPath = action?.screenshot_path || (action?.warning ? snapshot?.screenshot_path || null : null);
   const stored = updateSave(db, id, {
     status: failed ? "failed" : "done",
-    screenshot_path: action?.screenshot_path || null,
+    screenshot_path: screenshotPath,
     action_result_json: JSON.stringify({
       sorted: {
         source: sorted.source,
@@ -106,7 +132,7 @@ async function storeSorted(db, id, post, options) {
         reply_text: post.reply_text || "",
         quote: post.quote || null,
       },
-      act: action,
+      act: { ...action, screenshot_path: screenshotPath },
     }),
     error: failed ? action?.error || "Repo run failed" : null,
   });
@@ -114,16 +140,45 @@ async function storeSorted(db, id, post, options) {
   return getSave(db, id) || stored;
 }
 
-function refreshFromLive(db, id, url, options) {
+function refreshFromLive(db, id, url, options, snapshot) {
   return ingest(url, { ...options, skipSaved: true })
-    .then((post) => storeSorted(db, id, post, options))
-    .catch(() => {});
+    .then((post) => storeSorted(db, id, post, { ...options, repoMode: "live" }, snapshot))
+    .catch((error) => {
+      const current = getSave(db, id);
+      if (current?.status === "acting" && snapshot?.kind && snapshot?.action_result_json) {
+        const preserved = preserveGood(snapshot, error instanceof Error ? error.message : String(error));
+        updateSave(db, id, {
+          status: "done",
+          author: snapshot.author,
+          text: snapshot.text,
+          kind: snapshot.kind,
+          summary: snapshot.summary,
+          why_you: snapshot.why_you,
+          why_you_source: snapshot.why_you_source,
+          why_you_profile_hash: snapshot.why_you_profile_hash,
+          screenshot_path: preserved.screenshot_path,
+          action_result_json: preserved.json,
+          error: null,
+        });
+      }
+    });
 }
 
-function hasLiveCache(url, options) {
-  const parsed = parseXStatusUrl(url);
-  if (!parsed) return false;
-  return Boolean(readCachedPost(parsed.id, options.cacheDir));
+function preserveGood(snapshot, attemptError) {
+  let parsed = {};
+  try {
+    parsed = JSON.parse(snapshot.action_result_json);
+  } catch {
+    parsed = {};
+  }
+  const act = asCachedReplay(
+    { ...(parsed.act || {}), screenshot_path: snapshot.screenshot_path || parsed.act?.screenshot_path || null },
+    attemptError,
+  );
+  return {
+    screenshot_path: act.screenshot_path,
+    json: JSON.stringify({ ...parsed, act }),
+  };
 }
 
 function snapshotOf(row) {

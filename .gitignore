@@ -7,3 +7,4 @@ data/*.sqlite-journal
 data/screenshots/
 data/pip-cache/
 data/live-cache/
+.tools/

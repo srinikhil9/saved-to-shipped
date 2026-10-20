@@ -1,14 +1,17 @@
+import { DEMO_RUN_BUDGET_MS } from "./limits.js";
 import { paths } from "./paths.js";
+import { asCachedReplay, lastGoodRun } from "./runner/fallback.js";
 import { loadCachedRepoRun } from "./runner/cache.js";
+import { isOffline } from "./runner/python.js";
 import { runRepo } from "./runner/runRepo.js";
 
 /**
  * Act stage.
  *
- * kind=repo clones the repo into a temp directory, installs into a venv
- * or local node_modules, runs the README quickstart (or a generated scrape),
- * and stores stdout plus a screenshot. Offline mode replays the committed
- * fixture instead of cloning. Other kinds stay as stubs.
+ * kind=repo clones, installs, and runs in a temp dir. Child processes get
+ * the runner's own allowlist (src/runner/env.js), not sanitizedEnv() and
+ * not process.env. A missed screenshot is a warning. A failed or over-budget
+ * live run falls back to the committed fixture, then the previous good row.
  */
 export async function act(save, options = {}) {
   if (save.kind === "repo") return actOnRepo(save, options);
@@ -31,9 +34,12 @@ export async function actOnRepo(save, options = {}) {
     };
   }
 
-  if (options.offline) {
-    const cached = loadCachedRepoRun(repoUrl, { screenshotDir: paths.screenshots });
-    if (cached) return cached;
+  const offline = options.offline === true || isOffline();
+  const mode = offline ? "cache" : options.repoMode || "live";
+  const screenshotDir = options.screenshotDir || paths.screenshots;
+  if (mode !== "live") {
+    const cached = loadCachedRepoRun(repoUrl, { screenshotDir });
+    if (cached) return asCachedReplay(cached, null);
     return {
       status: "failed",
       error: `No cached run for ${repoUrl}`,
@@ -41,19 +47,58 @@ export async function actOnRepo(save, options = {}) {
     };
   }
 
-  const result = await runRepo({
-    saveId: save.id,
-    repoUrl,
-    screenshotDir: paths.screenshots,
-    onLog: (line) => console.log(`[save ${save.id}] ${line}`),
-  });
+  const execute = options.runRepo || runRepo;
+  let result;
+  try {
+    result = await execute({
+      saveId: save.id,
+      repoUrl,
+      screenshotDir,
+      deadlineMs: options.demoBudgetMs ?? DEMO_RUN_BUDGET_MS,
+      onLog: (line) => console.log(`[save ${save.id}] ${line}`),
+    });
+  } catch (error) {
+    result = {
+      error: error instanceof Error ? error.message : String(error),
+      stdout: "",
+      screenshot_path: null,
+      warning: null,
+      action_result_json: null,
+    };
+  }
+
+  if (!result.error) {
+    const action = result.action_result_json || {};
+    return {
+      ...action,
+      status: "ok",
+      error: null,
+      warning: result.warning || action.warning || null,
+      stdout: result.stdout ?? action.stdout ?? "",
+      screenshot_path: result.screenshot_path || null,
+      repo_url: repoUrl,
+    };
+  }
+
+  const cached = loadCachedRepoRun(repoUrl, { screenshotDir });
+  const previous = lastGoodRun(save.previous);
+  const good = cached || previous;
+  if (good) {
+    const replay = asCachedReplay({ ...good, repo_url: good.repo_url || repoUrl }, result.error);
+    const failed = result.action_result_json || {};
+    if (failed.install_stderr) replay.install_stderr = failed.install_stderr;
+    if (failed.install_attempts) replay.install_attempts = failed.install_attempts;
+    return replay;
+  }
+
   const action = result.action_result_json || {};
   return {
     ...action,
-    status: result.error ? "failed" : "ok",
+    status: "failed",
     error: result.error,
-    stdout: result.stdout,
-    screenshot_path: result.screenshot_path,
+    warning: result.warning || null,
+    stdout: result.stdout || "",
+    screenshot_path: result.screenshot_path || null,
     repo_url: repoUrl,
   };
 }

@@ -130,6 +130,10 @@ function renderCard(save) {
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
       ${save.why_you ? `<p class="why">${escapeHtml(save.why_you)}</p>` : ""}
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
+      ${action?.act?.status === "cached" ? `<span class="badge other">cached</span>` : ""}
+      ${action?.act?.fallback_note ? `<p class="repo">${escapeHtml(action.act.fallback_note)}</p>` : ""}
+      ${action?.act?.attempt_error ? `<p class="error">${escapeHtml(clip(action.act.attempt_error))}</p>` : ""}
+      ${installNote(action?.act)}
       ${save.screenshot_path ? `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">` : ""}
       ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
     </article>
@@ -139,6 +143,14 @@ function renderCard(save) {
 function renderLastRun(save, act) {
   const sample = Array.isArray(act?.extracted_sample) ? act.extracted_sample : [];
   const parts = [];
+  if (act?.status === "cached") parts.push(`<p class="badge other">cached</p>`);
+  if (act?.fallback_note) parts.push(`<p class="repo">${escapeHtml(act.fallback_note)}</p>`);
+  if (act?.warning) parts.push(`<p class="repo">${escapeHtml(act.warning)}</p>`);
+  if (act?.attempt_error) parts.push(`<p class="error">${escapeHtml(act.attempt_error)}</p>`);
+  if (act?.install_step) parts.push(`<p class="repo">install ${escapeHtml(act.install_step)}</p>`);
+  if (act?.install_stderr && !String(act.attempt_error || "").includes(String(act.install_stderr).slice(0, 80))) {
+    parts.push(`<h3>install</h3><pre class="post">${escapeHtml(clip(act.install_stderr, 2000))}</pre>`);
+  }
   if (act && (save.screenshot_path || act.stdout)) {
     const bits = [
       act.language || "",
@@ -318,6 +330,19 @@ function detailRow(label, value) {
   const href = typeof value === "string" ? safeHref(value) : null;
   const shown = href ? `<a href="${escapeHtml(href)}">${escapeHtml(href)}</a>` : escapeHtml(String(value));
   return `<dt>${escapeHtml(label)}</dt><dd>${shown}</dd>`;
+}
+
+function clip(text, max = 600) {
+  const value = String(text || "");
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function installNote(act) {
+  if (!act?.install_stderr) return "";
+  const head = String(act.install_stderr).slice(0, 80);
+  if (act.attempt_error && String(act.attempt_error).includes(head)) return "";
+  return `<p class="error">${escapeHtml(clip(act.install_stderr))}</p>`;
 }
 
 function excerpt(text) {
