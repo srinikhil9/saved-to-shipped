@@ -1,0 +1,20 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Saved to Shipped//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:acceleratorcon-20261023@saved-to-shipped
+DTSTAMP:20261020T000000Z
+DTSTART;VALUE=DATE:20261023
+DTEND;VALUE=DATE:20261024
+SUMMARY:AcceleratorCON 2026 | Connect with Accelerators\, Investors & Found
+ ers
+LOCATION:New York\, NY
+URL:https://luma.com/tuwo7wrd
+DESCRIPTION:Excited to join the conversation at AcceleratorCON\, Oct 23\, i
+ n New York.\n\n🎟️ I have 10 FREE Founder tickets\nUse PAUL100 while t
+ hey last. Then PAUL25 saves you 25% on any pass.\n\n👉 Ticket: https://l
+ uma.com/tuwo7wrd
+END:VEVENT
+END:VCALENDAR

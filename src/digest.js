@@ -1,3 +1,5 @@
+import { isReadmeOnlyCache } from "./runner/fallback.js";
+
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const TOP_N = 2;
 
@@ -19,7 +21,7 @@ export function buildDigest(rows, profile = {}, options = {}) {
   if (!since) throw new Error("since must be an ISO timestamp");
   const picked = (rows || []).filter((row) => inWindow(row, since));
   const saved = picked.length;
-  const tried = picked.filter((row) => actReallyRan(actOf(row))).length;
+  const tried = picked.filter((row) => actReallyRan(actOf(row), row)).length;
   const top = picked
     .map((row) => ({
       id: row.id,
@@ -27,7 +29,7 @@ export function buildDigest(rows, profile = {}, options = {}) {
       title: titleOf(row),
       kind: row.kind || null,
       why_you: row.why_you || "",
-      action: actionLine(actOf(row), options.baseUrl),
+      action: actionLine(actOf(row), options.baseUrl, row),
       score: scoreSave(row, profile),
       created_at: row.created_at || "",
     }))
@@ -44,21 +46,28 @@ export function buildDigest(rows, profile = {}, options = {}) {
 }
 
 export function hasActResult(row) {
-  return actReallyRan(actOf(row));
+  return actReallyRan(actOf(row), row);
 }
 
-/** A skipped stub, or a save with no act payload, did not run. */
-export function actReallyRan(act) {
+/** A skipped stub, a tool, an event, a README-only cache, or a save with no act payload did not run. */
+export function actReallyRan(act, row = null) {
   if (!act || typeof act !== "object" || Array.isArray(act)) return false;
+  if (row?.kind === "tool" || row?.kind === "event") return false;
   if (act.status === "skipped") return false;
+  if (isReadmeOnlyCache(act)) return false;
+  if (hasTrySteps(act) || hasCalendar(act)) return false;
   if (act.zipUrl || act.type === "spec" || act.type === "starter") return true;
   if (act.status === "ok" || act.status === "cached" || act.status === "done" || act.status === "failed") return true;
   if (act.exit_code != null || act.stdout || act.duration_ms != null || act.run_duration_ms != null) return true;
   return false;
 }
 
-export function actionLine(act, baseUrl = "") {
-  if (!actReallyRan(act)) return "not tried yet";
+export function actionLine(act, baseUrl = "", row = null) {
+  if (act && isReadmeOnlyCache(act)) return "README cached";
+  if (hasCalendar(act)) return ".ics added";
+  if (hasTrySteps(act)) return "try-it steps";
+  if (row?.kind === "tool" || row?.kind === "event") return "not tried yet";
+  if (!actReallyRan(act, row)) return "not tried yet";
   if (typeof act.zipUrl === "string" && act.zipUrl) return `spec zip ${absoluteUrl(act.zipUrl, baseUrl)}`;
   const ms = numberOrNull(act.duration_ms) ?? numberOrNull(act.run_duration_ms);
   const failed =
@@ -185,6 +194,14 @@ function titleOf(row) {
   if (row.author) return row.author;
   if (row.summary) return String(row.summary).split("\n")[0].slice(0, 80);
   return row.url || `Save ${row.id}`;
+}
+
+function hasTrySteps(act) {
+  return Array.isArray(act?.steps) && act.steps.length > 0;
+}
+
+function hasCalendar(act) {
+  return typeof act?.ics === "string" && act.ics.length > 0;
 }
 
 function actOf(row) {

@@ -41,6 +41,24 @@ test("each seed keeps its stage line when sorted as another likely kind", () => 
   assert.equal(whyYou({ kind: "other", text: FIXTURES.brain.text }, profile), BRAIN);
 });
 
+test("new seeds get a one-line why_you for the product recommender", () => {
+  const cua = whyYou({ kind: "repo", text: "Introducing the Cua Spaces SDK." }, profile);
+  const wabi = whyYou({ kind: "tool", text: "Wabi 2.0 is live!" }, profile);
+  const veeza = whyYou({ kind: "other", text: "Today we're launching Veeza AI." }, profile);
+  const event = whyYou({ kind: "event", text: "AcceleratorCON, Oct 23, in New York." }, profile);
+  const fortress = whyYou({ kind: "tool", text: 'Fortress(Tilion YC F26): A stealth Chromium' }, profile);
+  for (const line of [cua, wabi, veeza, event, fortress]) {
+    assert.equal(line.includes("\n"), false);
+    assert.ok(line.length < 140, line);
+    assert.equal(line.includes(profile.building), false);
+  }
+  assert.equal(cua, "Cua Spaces is infra for the scraping agents that pull social data for your YC/a16z product recommender.");
+  assert.equal(wabi, "Wabi is the kind of a16z consumer product your recommender should surface to the right users.");
+  assert.equal(veeza, "Veeza is the kind of YC consumer product your recommender should surface to the right users.");
+  assert.equal(event, "AcceleratorCON is where you meet the YC and a16z founders whose products feed your catalog.");
+  assert.equal(fortress, "Fortress is stealth-browser infra so your scraping agents stop getting blocked.");
+});
+
 test("fallback lines stay short and do not paste the profile sentence", () => {
   const line = whyYou({ kind: "event", text: "RSVP for the meetup." }, profile);
   assert.equal(line, "An event for people building your social-data recommender.");

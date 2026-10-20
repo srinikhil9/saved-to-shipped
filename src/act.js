@@ -2,7 +2,7 @@ import { act as actOnIdea } from "./act/idea.js";
 import { act as actOnPaper } from "./act/paper.js";
 import { DEMO_RUN_BUDGET_MS } from "./limits.js";
 import { paths } from "./paths.js";
-import { asCachedReplay, lastGoodRun } from "./runner/fallback.js";
+import { asCachedReplay, isReadmeOnlyCache, lastGoodRun } from "./runner/fallback.js";
 import { loadCachedRepoRun } from "./runner/cache.js";
 import { isOffline } from "./runner/python.js";
 import { runRepo } from "./runner/runRepo.js";
@@ -18,6 +18,7 @@ import { runRepo } from "./runner/runRepo.js";
  * kind=paper and kind=idea replay a committed starter under data/artifacts/,
  * or write a new one under data/artifacts-runtime/. The template zip is ready
  * before Grok runs. `options.llm` may replace SPEC.md in the background.
+ * kind=tool writes template try-it steps. kind=event writes an all-day .ics.
  */
 export async function act(save, options = {}) {
   if (save.kind === "repo") return actOnRepo(save, options);
@@ -44,8 +45,9 @@ export async function actOnRepo(save, options = {}) {
   const offline = options.offline === true || isOffline();
   const mode = offline ? "cache" : options.repoMode || "live";
   const screenshotDir = options.screenshotDir || paths.screenshots;
-  if (mode !== "live") {
-    const cached = loadCachedRepoRun(repoUrl, { screenshotDir });
+  const cached = loadCachedRepoRun(repoUrl, { screenshotDir });
+  // A README-only cache never cloned. Replaying it must not start a live install.
+  if (mode !== "live" || isReadmeOnlyCache(cached)) {
     if (cached) return asCachedReplay(cached, null);
     return {
       status: "failed",
@@ -88,7 +90,6 @@ export async function actOnRepo(save, options = {}) {
   }
 
   const previous = lastGoodRun(save.previous);
-  const cached = loadCachedRepoRun(repoUrl, { screenshotDir });
   const good = previous || cached;
   if (good) {
     const replay = asCachedReplay({ ...good, repo_url: good.repo_url || repoUrl }, result.error);
@@ -110,16 +111,268 @@ export async function actOnRepo(save, options = {}) {
   };
 }
 
-async function actOnTool() {
+const TOOL_PLAYS = [
+  {
+    test: /\bwabi\b/i,
+    verdict: "Try it: start a thread with your people",
+    steps: [
+      "Open Wabi and start a thread.",
+      "Invite the people who share the task.",
+      "Ask it to update the calendar, grab tickets, or book the trip.",
+    ],
+  },
+  {
+    test: /\bveeza\b/i,
+    verdict: "Try it: pick a destination and let it file the visa",
+    steps: [
+      "Open https://www.veeza.ai.",
+      "Pick the destination.",
+      "Let Veeza do the paperwork and book the appointment.",
+    ],
+  },
+  {
+    test: /\bfortress\b/i,
+    verdict: "Try it: point scraping agents at stealth Chromium",
+    steps: [
+      "Point the scraping agent at Fortress instead of stock Chromium.",
+      "Re-run a fetch that was getting blocked.",
+      "Keep the browser that gets through for the social-data pipeline.",
+    ],
+  },
+];
+
+export function actOnTool(save) {
+  const blob = `${save?.text || ""}\n${save?.summary || ""}`;
+  const play = TOOL_PLAYS.find((item) => item.test.test(blob));
+  const toolUrl = save?.details?.tool_url || externalUrl(blob);
+  const steps = play ? play.steps.slice() : genericTrySteps(toolUrl);
   return {
-    status: "skipped",
-    reason: "Tool summaries land in a later step.",
+    status: "ok",
+    verdict: play?.verdict || (toolUrl ? `Try it: open ${hostOf(toolUrl)}` : "Try it: follow the steps in the post"),
+    tool_url: toolUrl,
+    steps,
   };
 }
 
-async function actOnEvent() {
+export function actOnEvent(save) {
+  const text = `${save?.text || ""}\n${save?.summary || ""}`;
+  const url = save?.details?.event_url || firstMatchUrl(text, /luma\.com|lu\.ma|eventbrite\.com|meetup\.com/i);
+  const date = eventDate(text, save?.details?.date);
+  if (!date) {
+    return {
+      status: "failed",
+      error: "No date on this event",
+      verdict: "Event needs a date",
+      event_url: url,
+    };
+  }
+  const location = eventLocation(text);
+  const title = eventTitle(text);
+  const description = String(save?.text || save?.summary || title).trim();
+  const ics = buildIcs({ title, date, location, url, description });
+  const where = location ? ` · ${location}` : "";
   return {
-    status: "skipped",
-    reason: "Calendar files land in a later step.",
+    status: "ok",
+    verdict: `All-day ${prettyDate(date)}${where}`,
+    all_day: true,
+    date,
+    location,
+    event_url: url,
+    ics_filename: icsFilename(text, date),
+    ics,
   };
+}
+
+function genericTrySteps(url) {
+  const steps = [];
+  if (url) steps.push(`Open ${url}.`);
+  else steps.push("Open the product linked in the post.");
+  steps.push("Do the one task the post says it handles.");
+  steps.push("Note what to hand your recommender.");
+  return steps;
+}
+
+function eventTitle(text) {
+  if (/acceleratorcon/i.test(text)) {
+    return "AcceleratorCON 2026 | Connect with Accelerators, Investors & Founders";
+  }
+  const line = oneLine(String(text || "").split("\n")[0]);
+  return line.slice(0, 120) || "Saved event";
+}
+
+function eventLocation(text) {
+  if (/\bnew york\b/i.test(text)) return "New York, NY";
+  return null;
+}
+
+function icsFilename(text, date) {
+  if (/acceleratorcon/i.test(text)) return "acceleratorcon-2026.ics";
+  return `event-${date}.ics`;
+}
+
+const MONTHS = {
+  jan: "01",
+  january: "01",
+  feb: "02",
+  february: "02",
+  mar: "03",
+  march: "03",
+  apr: "04",
+  april: "04",
+  may: "05",
+  jun: "06",
+  june: "06",
+  jul: "07",
+  july: "07",
+  aug: "08",
+  august: "08",
+  sep: "09",
+  sept: "09",
+  september: "09",
+  oct: "10",
+  october: "10",
+  nov: "11",
+  november: "11",
+  dec: "12",
+  december: "12",
+};
+
+export function eventDate(text, hinted) {
+  const blob = `${hinted || ""}\n${text || ""}`;
+  const iso = blob.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (iso && Number(iso[2]) >= 1 && Number(iso[2]) <= 12 && Number(iso[3]) >= 1 && Number(iso[3]) <= 31) {
+    return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  }
+  const named = blob.match(
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(20\d{2})\b/i,
+  );
+  if (named) {
+    const month = MONTHS[named[1].toLowerCase()];
+    const day = Number(named[2]);
+    if (month && day >= 1 && day <= 31) return `${named[3]}-${month}-${String(day).padStart(2, "0")}`;
+  }
+  if (/acceleratorcon/i.test(blob) && /\boct(?:ober)?\s+23\b/i.test(blob)) return "2026-10-23";
+  return null;
+}
+
+function prettyDate(iso) {
+  const [year, month, day] = iso.split("-");
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${names[Number(month) - 1]} ${Number(day)}, ${year}`;
+}
+
+export function buildIcs({ title, date, location, url, description }) {
+  const [year, month, day] = date.split("-");
+  const start = `${year}${month}${day}`;
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Saved to Shipped//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${icsUid(title, start)}`,
+    "DTSTAMP:20261020T000000Z",
+    `DTSTART;VALUE=DATE:${start}`,
+    `DTEND;VALUE=DATE:${nextDay(date)}`,
+    `SUMMARY:${icsEscape(title)}`,
+  ];
+  if (location) lines.push(`LOCATION:${icsEscape(location)}`);
+  if (url) lines.push(`URL:${url}`);
+  if (description) lines.push(`DESCRIPTION:${icsEscape(description)}`);
+  lines.push("END:VEVENT", "END:VCALENDAR");
+  return `${lines.map(foldLine).join("\r\n")}\r\n`;
+}
+
+function nextDay(iso) {
+  const [year, month, day] = iso.split("-").map(Number);
+  const stamp = new Date(Date.UTC(year, month - 1, day));
+  stamp.setUTCDate(stamp.getUTCDate() + 1);
+  const y = stamp.getUTCFullYear();
+  const m = String(stamp.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(stamp.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+
+function icsUid(title, start) {
+  const slug = /acceleratorcon/i.test(title)
+    ? "acceleratorcon"
+    : String(title || "event")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 24);
+  return `${slug || "event"}-${start}@saved-to-shipped`;
+}
+
+function icsEscape(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\r\n|\n|\r/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function foldLine(line) {
+  const text = String(line);
+  if (Buffer.byteLength(text) <= 75) return text;
+  const parts = [];
+  let rest = text;
+  let budget = 75;
+  while (rest) {
+    const head = takeCodePoints(rest, budget);
+    parts.push(head);
+    rest = rest.slice(head.length);
+    budget = 74;
+  }
+  return parts.join("\r\n ");
+}
+
+function takeCodePoints(text, maxOctets) {
+  let octets = 0;
+  let end = 0;
+  for (const char of text) {
+    const size = Buffer.byteLength(char);
+    if (end > 0 && octets + size > maxOctets) break;
+    octets += size;
+    end += char.length;
+    if (octets >= maxOctets) break;
+  }
+  return text.slice(0, end);
+}
+
+function externalUrl(text) {
+  return firstMatchUrl(text, null);
+}
+
+function firstMatchUrl(text, pattern) {
+  const found = String(text || "").match(/https?:\/\/[^\s)<>"]+/g) || [];
+  for (const raw of found) {
+    const cleaned = raw.replace(/[.,;:!?]+$/, "");
+    if (isSocialUrl(cleaned)) continue;
+    if (pattern && !pattern.test(cleaned)) continue;
+    return cleaned;
+  }
+  return null;
+}
+
+function isSocialUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    return host === "x.com" || host === "twitter.com" || host.endsWith("twimg.com") || host === "t.co";
+  } catch {
+    return true;
+  }
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function oneLine(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }

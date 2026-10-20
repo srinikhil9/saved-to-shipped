@@ -1,4 +1,5 @@
 import { renderFileList, renderZipLink } from "./act/snippet.js";
+import { isReadmeOnlyCache, README_ONLY_NOTE } from "./runner/fallback.js";
 import { extractProducts } from "./runner/quickstart.js";
 
 const KINDS = ["repo", "tool", "paper", "idea", "event", "other"];
@@ -78,7 +79,38 @@ export function renderCards(saves) {
   if (!saves.length) {
     return `<p class="empty">No saves yet. Paste a post and a card will show up here.</p>`;
   }
-  return saves.map(renderCard).join("");
+  return feedOrder(saves).map(renderCard).join("");
+}
+
+const SCRAPLING_STATUS = "2025902150296236050";
+
+/** Finished install-and-run repos lead. A Scrapling paste leads while it is still running too. */
+function feedOrder(saves) {
+  const ranked = saves.map((save, index) => ({ save, index, lead: leadsFeed(save) ? 0 : 1 }));
+  ranked.sort((a, b) => a.lead - b.lead || a.index - b.index);
+  return ranked.map((item) => item.save);
+}
+
+function leadsFeed(save) {
+  if (ranForReal(save)) return true;
+  return isRunning(save) && isScraplingPost(save);
+}
+
+function isRunning(save) {
+  return save?.status === "queued" || save?.status === "sorting" || save?.status === "acting";
+}
+
+function isScraplingPost(save) {
+  return String(save?.url || "").includes(`/status/${SCRAPLING_STATUS}`);
+}
+
+function ranForReal(save) {
+  if (save?.kind !== "repo") return false;
+  const act = parseAction(save)?.act;
+  if (!act || isReadmeOnlyCache(act)) return false;
+  if (Number(act.exit_code) !== 0) return false;
+  const ms = act.duration_ms ?? act.run_duration_ms;
+  return ms != null && Number.isFinite(Number(ms)) && Number(ms) >= 0;
 }
 
 export function renderNotFound() {
@@ -121,6 +153,7 @@ export function renderDetail(save) {
           ${detailRow("Repo", details.repo_url)}
           ${detailRow("Paper", details.paper_url)}
           ${detailRow("Tool", details.tool_url)}
+          ${detailRow("Event", details.event_url)}
           ${detailRow("Date", details.date)}
           ${detailRow("Sorted by", action?.sorted?.source)}
         </dl>
@@ -173,6 +206,7 @@ function renderRepoDetail(save, action, details, links, act, products) {
             ${detailRow("Repo", details.repo_url)}
             ${detailRow("Paper", details.paper_url)}
             ${detailRow("Tool", details.tool_url)}
+            ${detailRow("Event", details.event_url)}
             ${detailRow("Date", details.date)}
             ${detailRow("Sorted by", action?.sorted?.source)}
           </dl>
@@ -268,27 +302,86 @@ function nextStep(act, details) {
 
 function renderCard(save) {
   const action = parseAction(save);
-  const repo = action?.sorted?.details?.repo_url;
+  const verdict = cardVerdict(save, action);
+  const summary = cardSummary(save);
   return `
-    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}" data-why="${save.why_you_source === "pending" ? "pending" : ""}"${upgradeAttr(save)}>
+    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}" data-verdict="${escapeHtml(verdict)}" data-why="${save.why_you_source === "pending" ? "pending" : ""}"${upgradeAttr(save)}>
       <div class="meta">
         ${save.kind ? badge(save.kind) : `<span class="badge other">Unsorted</span>`}
         ${statusPill(save.status)}
       </div>
       <h2><a href="/saves/${save.id}">${escapeHtml(cardTitle(save))}</a></h2>
-      <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
-      ${save.why_you ? `<p class="why">${escapeHtml(save.why_you)}</p>` : ""}
-      ${action?.act?.zipUrl ? `<p class="action-summary">${escapeHtml(action.act.summary || "")}</p>` : ""}
+      ${verdict ? `<p class="verdict-line">${escapeHtml(verdict)}</p>` : ""}
+      ${save.why_you ? `<p class="why"><span class="k">Why you</span> ${escapeHtml(save.why_you)}</p>` : ""}
+      ${summary ? `<p class="summary">${escapeHtml(summary)}</p>` : ""}
       ${renderZipLink(action?.act)}
-      ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
-      ${action?.act?.status === "cached" ? `<span class="badge other">cached</span>` : ""}
-      ${action?.act?.fallback_note ? `<p class="repo">${escapeHtml(action.act.fallback_note)}</p>` : ""}
-      ${action?.act?.attempt_error ? `<p class="error">${escapeHtml(clip(action.act.attempt_error))}</p>` : ""}
-      ${installNote(action?.act)}
-      ${save.screenshot_path ? `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">` : ""}
+      ${actionLinks(save, action)}
+      ${cardNotes(action?.act)}
       ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
     </article>
   `;
+}
+
+function cardNotes(act) {
+  if (!act) return "";
+  const bits = [];
+  if (act.status === "cached" && !isReadmeOnlyCache(act)) bits.push(`<span class="badge other">cached</span>`);
+  if (act.attempt_error) {
+    if (act.fallback_note) bits.push(`<p class="note">${escapeHtml(act.fallback_note)}</p>`);
+    bits.push(`<p class="error">${escapeHtml(clip(act.attempt_error))}</p>`);
+  }
+  const install = installNote(act);
+  if (install) bits.push(install);
+  return bits.join("");
+}
+
+export function cardVerdict(save, action = parseAction(save)) {
+  const act = action?.act;
+  if (save?.kind === "repo" && act && hasRunTiming(act)) return verdictLine(act);
+  if (act?.verdict) return String(act.verdict);
+  if (act?.summary) return excerpt(act.summary, 120);
+  if (act?.reason) return excerpt(act.reason, 90);
+  if (save?.summary) return excerpt(save.summary, 90);
+  return "";
+}
+
+function hasRunTiming(act) {
+  if (act.timed_out === true || act.exit_code != null) return true;
+  if (act.duration_ms != null && Number.isFinite(Number(act.duration_ms))) return true;
+  if (act.run_duration_ms != null && Number.isFinite(Number(act.run_duration_ms))) return true;
+  return false;
+}
+
+function cardSummary(save) {
+  const summary = save?.summary || excerpt(save?.text, 140) || "";
+  return excerpt(summary, 140);
+}
+
+function actionLinks(save, action) {
+  const act = action?.act;
+  const details = action?.sorted?.details || {};
+  const links = [];
+  const repo = act?.repo_url || details.repo_url;
+  if (repo && safeHref(repo)) links.push(`<a href="${escapeHtml(repo)}">Repo</a>`);
+  if (save.kind === "tool") {
+    const tool = act?.tool_url || details.tool_url;
+    if (tool && safeHref(tool)) links.push(`<a href="${escapeHtml(tool)}">Try it</a>`);
+    else links.push(`<a href="/saves/${save.id}#try-it">Try it</a>`);
+  }
+  if (save.kind === "event" && act?.ics) {
+    const name = act.ics_filename || "event.ics";
+    links.push(`<a href="/saves/${save.id}/event.ics">${escapeHtml(name)}</a>`);
+  } else if (details.event_url && safeHref(details.event_url)) {
+    links.push(`<a href="${escapeHtml(details.event_url)}">Event</a>`);
+  }
+  if (act?.zip_path && localHref(act.zip_path)) {
+    links.push(`<a href="${escapeHtml(localHref(act.zip_path))}">Zip</a>`);
+  }
+  if (save.screenshot_path && localHref(save.screenshot_path)) {
+    links.push(`<a href="${escapeHtml(save.screenshot_path)}">Screenshot</a>`);
+  }
+  if (!links.length) return "";
+  return `<p class="actions">${links.join("")}</p>`;
 }
 
 function renderLastRun(save, act, options = {}) {
@@ -301,16 +394,18 @@ function renderLastRun(save, act, options = {}) {
     `;
   }
   const sample = Array.isArray(act?.extracted_sample) ? act.extracted_sample : [];
+  const readmeOnly = isReadmeOnlyCache(act);
   const parts = [];
-  if (act?.status === "cached") parts.push(`<p class="badge other">cached</p>`);
-  if (act?.fallback_note) parts.push(`<p class="repo">${escapeHtml(act.fallback_note)}</p>`);
+  if (act?.status === "cached" && !readmeOnly) parts.push(`<p class="badge other">cached</p>`);
+  if (readmeOnly) parts.push(`<p class="repo">${escapeHtml(README_ONLY_NOTE)}</p>`);
+  else if (act?.fallback_note) parts.push(`<p class="repo">${escapeHtml(act.fallback_note)}</p>`);
   if (act?.warning) parts.push(`<p class="repo">${escapeHtml(act.warning)}</p>`);
   if (act?.attempt_error) parts.push(`<p class="error">${escapeHtml(act.attempt_error)}</p>`);
   if (act?.install_step) parts.push(`<p class="repo">install ${escapeHtml(act.install_step)}</p>`);
   if (act?.install_stderr && !String(act.attempt_error || "").includes(String(act.install_stderr).slice(0, 80))) {
     parts.push(`<h3>install</h3><pre class="post">${escapeHtml(clip(act.install_stderr, 2000))}</pre>`);
   }
-  if (act && (save.screenshot_path || act.stdout)) {
+  if (!readmeOnly && act && (save.screenshot_path || act.stdout)) {
     const bits = [
       act.language || "",
       act.exit_code == null ? "" : `exit ${act.exit_code}`,
@@ -324,6 +419,13 @@ function renderLastRun(save, act, options = {}) {
   }
   if (save.screenshot_path && options.screenshot !== false) {
     parts.push(`<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">`);
+  }
+  if (Array.isArray(act?.steps) && act.steps.length) {
+    parts.push(`<ol class="steps" id="try-it">${act.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>`);
+  }
+  if (act?.ics) {
+    const name = act.ics_filename || "event.ics";
+    parts.push(`<p><a href="/saves/${save.id}/event.ics">${escapeHtml(name)}</a></p>`);
   }
   if (act?.stdout) {
     parts.push(`<h3>stdout</h3><pre class="post" id="stdout">${escapeHtml(act.stdout)}</pre>`);
@@ -426,10 +528,17 @@ function layout({ title, body }) {
       padding: 12px 18px;
       cursor: pointer;
     }
-    .cards { display: grid; gap: 12px; }
+    .cards { display: grid; gap: 10px; }
     .card, .detail { padding: 16px 18px; }
+    .card { padding: 12px 14px; }
     .card h2, .detail h1 { font-family: Palatino, Georgia, serif; margin: 8px 0; }
-    .card h2 { font-size: 26px; }
+    .card h2 { font-size: 20px; line-height: 1.2; margin: 4px 0; }
+    .card .summary { margin: 4px 0 0; font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .card .why { margin: 2px 0 0; font-size: 14px; }
+    .verdict-line { margin: 2px 0 0; font-weight: 700; font-size: 15px; }
+    .actions { margin: 8px 0 0; font-size: 13px; }
+    .actions a { display: inline-block; margin: 0 8px 0 0; }
+    .k { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-right: 6px; }
     .card h2 a, .back a { text-decoration: none; }
     .meta { display: flex; gap: 8px; align-items: center; }
     .badge, .status {
@@ -485,7 +594,7 @@ function layout({ title, body }) {
     }
     .verdict .works { margin: 0; font-weight: 700; color: var(--good); }
     .verdict .why, .verdict .next { margin: 2px 0 0; }
-    .verdict .k { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-right: 6px; }
+    .verdict .k { margin-right: 6px; }
     .snippet {
       margin: 4px 0 0;
       padding: 6px 8px;
@@ -504,6 +613,9 @@ function layout({ title, body }) {
     details.more { margin-top: 12px; }
     details.more summary { cursor: pointer; font-weight: 700; }
     details.more .post { margin-top: 8px; }
+    @media (min-width: 960px) {
+      .cards { grid-template-columns: 1fr 1fr; }
+    }
     @media (max-width: 640px) {
       h1 { font-size: 34px; }
       .row { flex-direction: column; }
@@ -557,11 +669,17 @@ function installNote(act) {
   return `<p class="error">${escapeHtml(clip(act.install_stderr))}</p>`;
 }
 
-function excerpt(text) {
+function excerpt(text, max = 180) {
   if (!text) return "";
-  const clean = text.replace(/\s+/g, " ").trim();
-  if (clean.length <= 180) return clean;
-  return `${clean.slice(0, 177).trimEnd()}…`;
+  const clean = String(text).replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max - 1).trimEnd()}…`;
+}
+
+function localHref(value) {
+  if (typeof value !== "string") return null;
+  if (value.startsWith("/") && !value.includes("..") && !value.includes("\\")) return value;
+  return safeHref(value);
 }
 
 function parseAction(save) {

@@ -1,0 +1,15 @@
+{
+  "id": "2112228154651881479",
+  "url": "https://x.com/trycua/status/2112228154651881479",
+  "author": "Cua",
+  "handle": "trycua",
+  "posted_at": "2026-10-19T17:03:30.000Z",
+  "text": "1/ Introducing the Cua Spaces SDK.\n\nEvery big lab now ships a bot with its own computer: Grok Bot, Muse, dots. None let you bring your own. With Cua Spaces, now you can. \n\nPut Claude Code, Codex or any agent on compute you choose, and run jobs across all your computers at once.",
+  "links": [
+    {
+      "short": null,
+      "expanded": "https://github.com/trycua/cua"
+    }
+  ],
+  "source": "Post text from the X API read on 2026-10-19 (exact text). The GitHub URL is the public Cua repo (https://github.com/trycua/cua), not a t.co link inside this post. Live install is skipped: Spaces is a macOS app. Offline replay uses fixtures/repo-runs/cua."
+}

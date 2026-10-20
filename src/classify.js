@@ -22,7 +22,7 @@ const RESERVED_GITHUB = new Set([
 const PAPER_TEXT = /\b(\d+\s*-\s*page\s+pdf|arxiv)\b/i;
 const IDEA_TEXT = /\b(idea|second brain|workflow|roadmap|how to|guide)\b/i;
 const EVENT_TEXT = /\b(rsvp|webinar|conference|meetup|hackathon|join us)\b/i;
-const TOOL_TEXT = /\b(tool|app|saas|sign up|try it|pip install|npm install)\b/i;
+const TOOL_TEXT = /\b(tool|app|saas|sign up|try it|pip install|npm install|launch(?:ing|ed)?|is live)\b/i;
 const DATE_RE =
   /\b(20\d{2}-\d{2}-\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+20\d{2})\b/;
 
@@ -59,6 +59,7 @@ export async function classifyWithGrok(input, heuristic, options = {}) {
         repo_url: cleanUrl(llm.repo_url) || heuristic.details.repo_url,
         paper_url: cleanUrl(llm.paper_url) || heuristic.details.paper_url,
         tool_url: cleanUrl(llm.tool_url) || heuristic.details.tool_url,
+        event_url: heuristic.details.event_url || null,
         date: llm.date || heuristic.details.date,
       },
     };
@@ -72,8 +73,10 @@ export function classifyHeuristic(input) {
   const urls = uniqueUrls(text);
   const repoUrl = urls.map(githubRepoUrl).find(Boolean) || null;
   const paperUrl = urls.find(isPaperUrl) || (PAPER_TEXT.test(text) ? urls.find(isDriveFile) : null) || null;
-  const date = (text.match(DATE_RE) || [])[1] || null;
+  let date = (text.match(DATE_RE) || [])[1] || null;
+  if (!date && /acceleratorcon/i.test(text) && /\boct(?:ober)?\s+23\b/i.test(text)) date = "2026-10-23";
   const external = urls.filter((url) => !isSocial(url) && !githubRepoUrl(url) && !isPaperUrl(url));
+  const eventUrl = urls.find((url) => /luma\.com|eventbrite\.com|meetup\.com|lu\.ma/i.test(url)) || null;
 
   let kind = "other";
   if (repoUrl) kind = "repo";
@@ -91,6 +94,7 @@ export function classifyHeuristic(input) {
       repo_url: repoUrl,
       paper_url: paperUrl,
       tool_url: toolUrl,
+      event_url: eventUrl,
       date,
     },
   };

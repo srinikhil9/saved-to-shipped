@@ -1,0 +1,10 @@
+Cua Spaces SDK — README cache. Live install skipped (macOS Spaces app).
+
+From https://github.com/trycua/cua (README, Cua Spaces):
+Give AI agents computers they can use. Cua Spaces gives agents full desktops on your Mac and on machines you own. This repo also holds Cua Driver, Lume, CUA-S1, and Cua Bench.
+
+Spaces is a desktop app. Each desktop is a Space: a macOS VM on your Mac, or a Linux image, including machines you own and your own cloud account. Install on macOS 26 or later (not run in this demo):
+  curl -fsSL https://cua.ai/install.sh | sh
+
+SDK: the same API in Python (pip install cua), TypeScript (@trycua/cua), Swift, and Kotlin.
+Quickstart: https://cua.ai/docs/spaces/quickstart

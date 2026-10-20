@@ -1,0 +1,20 @@
+{
+  "id": "2112212804979880239",
+  "url": "https://x.com/ekuyda/status/2112212804979880239",
+  "kind": "tool",
+  "summary": "Wabi 2.0 is live! personal agents are one person, one chat.",
+  "verdict": "Try it: start a thread with your people",
+  "why_you": "Wabi is the kind of a16z consumer product your recommender should surface to the right users.",
+  "why_you_source": "template",
+  "act": {
+    "status": "ok",
+    "verdict": "Try it: start a thread with your people",
+    "tool_url": null,
+    "steps": [
+      "Open Wabi and start a thread.",
+      "Invite the people who share the task.",
+      "Ask it to update the calendar, grab tickets, or book the trip."
+    ],
+    "screenshot_path": null
+  }
+}

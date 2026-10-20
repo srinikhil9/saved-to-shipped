@@ -53,7 +53,7 @@ curl -s 'http://localhost:3000/api/digest?since=2026-10-13T00:00:00.000Z'
 
 `since` is optional and defaults to the last 7 days. It must be an ISO timestamp (`400` otherwise). Counts and the top list only include saves created at or after `since`.
 
-`tried` counts saves whose act stage really ran: a repo run, a spec, or a starter. Skipped kinds (tool, event, other) and saves with no act payload are not counted. Ranking is deterministic keyword overlap with the active profile. It does not call a model.
+`tried` counts saves whose act stage really ran: a repo run, a spec, or a starter. Tool and event results, a README-only repo cache, skipped kinds, and saves with no act payload are not counted. Ranking is deterministic keyword overlap with the active profile. It does not call a model.
 
 ```json
 {
@@ -75,7 +75,7 @@ curl -s 'http://localhost:3000/api/digest?since=2026-10-13T00:00:00.000Z'
 }
 ```
 
-`top` has at most two items. Each markdown block is the title, kind, `why_you`, and one action line (`repo run ok in Ns`, `repo run failed`, or `spec zip https://host/artifacts/...`). Zip links are absolute. Set `BASE_URL` (for example `https://demo.example`) to choose the origin; otherwise the link uses the request host.
+`top` has at most two items. Each markdown block is the title, kind, `why_you`, and one action line (`repo run ok in Ns`, `repo run failed`, `spec zip https://host/artifacts/...`, `try-it steps`, `.ics added`, or `README cached`). Zip links are absolute. Set `BASE_URL` (for example `https://demo.example`) to choose the origin; otherwise the link uses the request host.
 
 ## Read the profile
 

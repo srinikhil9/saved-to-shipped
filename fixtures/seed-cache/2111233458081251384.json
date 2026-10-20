@@ -1,0 +1,20 @@
+{
+  "id": "2111233458081251384",
+  "url": "https://x.com/seobrien/status/2111233458081251384",
+  "kind": "event",
+  "summary": "Excited to join the conversation at AcceleratorCON, Oct 23, in New York. 🎟️ I have 10 FREE Founder tickets Use PAUL100 while they last.",
+  "verdict": "All-day Oct 23, 2026 · New York, NY",
+  "why_you": "AcceleratorCON is where you meet the YC and a16z founders whose products feed your catalog.",
+  "why_you_source": "template",
+  "act": {
+    "status": "ok",
+    "verdict": "All-day Oct 23, 2026 · New York, NY",
+    "all_day": true,
+    "date": "2026-10-23",
+    "location": "New York, NY",
+    "event_url": "https://luma.com/tuwo7wrd",
+    "ics_filename": "acceleratorcon-2026.ics",
+    "ics": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Saved to Shipped//EN\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\nUID:acceleratorcon-20261023@saved-to-shipped\r\nDTSTAMP:20261020T000000Z\r\nDTSTART;VALUE=DATE:20261023\r\nDTEND;VALUE=DATE:20261024\r\nSUMMARY:AcceleratorCON 2026 | Connect with Accelerators\\, Investors & Found\r\n ers\r\nLOCATION:New York\\, NY\r\nURL:https://luma.com/tuwo7wrd\r\nDESCRIPTION:Excited to join the conversation at AcceleratorCON\\, Oct 23\\, i\r\n n New York.\\n\\n🎟️ I have 10 FREE Founder tickets\\nUse PAUL100 while t\r\n hey last. Then PAUL25 saves you 25% on any pass.\\n\\n👉 Ticket: https://l\r\n uma.com/tuwo7wrd\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+    "screenshot_path": null
+  }
+}

@@ -89,6 +89,7 @@ test("run again keeps the previous card when the refetch fails", async (t) => {
   assert.equal(failed.error, READ_FAILED);
   const cards = await fetch(`${base}/feed/cards`).then((response) => response.text());
   assert.match(cards, /Couldn't read this post/);
+  assert.match(cards, /Couldn't read this post\. Check the link or your connection\./);
   assert.doesNotMatch(cards, /Fetching post/);
 });
 
