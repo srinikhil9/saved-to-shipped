@@ -159,7 +159,7 @@ export function renderDetail(save) {
 }
 
 function renderRepoDetail(save, action, details, links, act, products) {
-  const works = verdictLine(act);
+  const works = verdictMarkup(act);
   const snippet = String(act.snippet || "").replace(/\s+$/, "");
   const next = nextStep(act, details);
   return `
@@ -170,8 +170,8 @@ function renderRepoDetail(save, action, details, links, act, products) {
           ${statusPill(save.status)}
         </div>
         <h1>${escapeHtml(save.author || save.url)}</h1>
-        <section class="verdict" id="verdict">
-          <p class="works">${escapeHtml(works)}</p>
+        <section class="verdict ${verdictTone(act)}" id="verdict">
+          <p class="line">${works}</p>
           ${save.why_you ? `<p class="why"><span class="k">Why you</span> ${escapeHtml(save.why_you)}</p>` : ""}
           ${snippet ? `<pre class="snippet">${escapeHtml(snippet)}</pre>` : ""}
           <p class="next"><span class="k">Next step</span> ${escapeHtml(next)}</p>
@@ -202,6 +202,7 @@ function renderRepoDetail(save, action, details, links, act, products) {
         </details>
         ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
         ${needsRefresh(save) ? `<script>setTimeout(function () { location.reload(); }, 800);</script>` : ""}
+        ${localTimeScript(act)}
         <form method="post" action="/api/saves/${save.id}/rerun">
           <button type="submit">Run again</button>
         </form>
@@ -246,9 +247,52 @@ function formatRunSeconds(ms) {
   return `${(n / 1000).toFixed(1)}s`;
 }
 
+function verdictMarkup(act) {
+  if (lastGoodAfterFailure(act) && act.timestamp) {
+    const iso = escapeHtml(act.timestamp);
+    const label = escapeHtml(formatUtcStamp(act.timestamp));
+    return `Works (last good run, <time datetime="${iso}">${label}</time>); latest run failed`;
+  }
+  return escapeHtml(verdictLine(act));
+}
+
+function formatUtcStamp(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return String(iso);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function localTimeScript(act) {
+  if (!lastGoodAfterFailure(act) || !act.timestamp) return "";
+  return `<script>
+    document.querySelectorAll("#verdict time[datetime]").forEach((node) => {
+      const date = new Date(node.dateTime || node.getAttribute("datetime"));
+      if (Number.isNaN(date.getTime())) return;
+      node.textContent = date.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      });
+    });
+  </script>`;
+}
+
 function verdictLine(act) {
   const wall = formatRunSeconds(act?.duration_ms);
   const scrape = formatRunSeconds(act?.run_duration_ms);
+  if (lastGoodAfterFailure(act)) {
+    const when = act.timestamp || "the last run";
+    return `Works (last good run, ${when}); latest run failed`;
+  }
   if (act?.timed_out === true) {
     return `Timed out after ${wall || scrape || "the budget"}`;
   }
@@ -258,6 +302,18 @@ function verdictLine(act) {
   }
   const runtime = act?.python ? ` (Python ${act.python})` : "";
   return `Works: ${timingClause(wall, scrape)}${runtime}`;
+}
+
+function verdictTone(act) {
+  if (lastGoodAfterFailure(act)) return "works";
+  if (act?.timed_out === true) return "timed";
+  if (act?.exit_code === 0) return "works";
+  if (act?.exit_code == null) return "none";
+  return "failed";
+}
+
+function lastGoodAfterFailure(act) {
+  return Boolean(act?.attempt_error) && act?.exit_code === 0 && act?.timed_out !== true;
 }
 
 function timingClause(wall, scrape) {
@@ -570,13 +626,19 @@ function layout({ title, body }) {
     .detail.lead { padding: 10px 14px 12px; }
     .detail.lead h1 { font-size: 26px; margin: 0 0 6px; }
     .verdict {
-      background: #f3faf6;
-      border: 1px solid #b7d7c4;
       border-radius: 12px;
       padding: 6px 12px 8px;
       margin: 0 0 6px;
     }
-    .verdict .works { margin: 0; font-weight: 700; color: var(--good); }
+    .verdict.works { background: #f3faf6; border: 1px solid #b7d7c4; }
+    .verdict.failed { background: #fde8e4; border: 1px solid #f0b8b0; }
+    .verdict.timed { background: #f8edd8; border: 1px solid #e4c48a; }
+    .verdict.none { background: #eeeae3; border: 1px solid #e3d9c8; }
+    .verdict .line { margin: 0; font-weight: 700; }
+    .verdict .line.works, .verdict.works .line { color: var(--good); }
+    .verdict .line.failed, .verdict.failed .line { color: var(--bad); }
+    .verdict .line.timed, .verdict.timed .line { color: var(--warn); }
+    .verdict .line.none, .verdict.none .line { color: var(--muted); }
     .verdict .why, .verdict .next { margin: 2px 0 0; }
     .verdict .k { margin-right: 6px; }
     .snippet {
