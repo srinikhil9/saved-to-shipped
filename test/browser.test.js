@@ -37,3 +37,24 @@ test("detects Chrome on macOS and honors CHROME_PATH", () => {
   assert.equal(channel.channel, "chrome");
   assert.equal(channel.source, "playwright-channel");
 });
+
+test("detects Chrome from a faked darwin filesystem", () => {
+  const files = new Set([
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ]);
+  const exists = (file) => files.has(file);
+
+  const chromium = detectBrowser({ platform: "darwin", env: {}, exists });
+  assert.equal(chromium.executablePath, "/Applications/Chromium.app/Contents/MacOS/Chromium");
+  assert.equal(chromium.source, "darwin");
+
+  files.add(MAC_CHROME);
+  const chrome = detectBrowser({ platform: "darwin", env: {}, exists });
+  assert.equal(chrome.executablePath, MAC_CHROME);
+  assert.equal(chrome.source, "darwin");
+
+  const missing = detectBrowser({ platform: "darwin", env: {}, exists: () => false });
+  assert.equal(missing.executablePath, undefined);
+  assert.equal(missing.channel, "chrome");
+  assert.equal(missing.source, "playwright-channel");
+});
