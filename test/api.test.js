@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/db.js";
@@ -12,7 +15,8 @@ const SEEDS = [
 
 test("API and HTML feed sort pasted seed URLs", async (t) => {
   const db = openDb(":memory:");
-  const app = createApp(db, { offline: true, env: {} });
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "saves-api-"));
+  const app = createApp(db, { offline: true, env: {}, cacheDir });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -64,6 +68,7 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   const html = await feed.text();
   assert.match(html, /Save it\. Ship it\./);
   assert.doesNotMatch(html, /http-equiv="refresh"/);
+  assert.doesNotMatch(html, /data-upgrade="pending"/);
   assert.match(html, /data-kind="repo"/);
   assert.match(html, /data-kind="paper"/);
   assert.match(html, /data-kind="idea"/);
@@ -73,6 +78,7 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   const detail = await fetch(`${base}/saves/${ids[0]}`);
   const detailHtml = await detail.text();
   assert.match(detailHtml, /Show last run/);
+  assert.doesNotMatch(detailHtml, /location\.reload/);
   assert.match(detailHtml, /scrapling-seed\.png/);
   assert.match(detailHtml, /id="stdout"/);
   const quote = done[0].action_result_json.act.extracted_sample[0].slice(0, 24);

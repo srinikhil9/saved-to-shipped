@@ -92,13 +92,42 @@ test("server startup marks stuck cards failed and leaves finished cards", () => 
   updateSave(db, acting.id, { status: "acting", kind: "idea" });
   const done = createSave(db, "https://x.com/a/status/4");
   updateSave(db, done.id, { status: "done", kind: "paper", summary: "kept" });
+  const rerunning = createSave(db, "https://x.com/a/status/5");
+  updateSave(db, rerunning.id, {
+    status: "sorting",
+    author: "Hasan",
+    kind: "repo",
+    summary: "kept",
+    action_result_json: JSON.stringify({
+      sorted: { source: "heuristic", upgrade: "pending", details: { repo_url: "https://github.com/D4Vinci/Scrapling" } },
+      act: { status: "skipped" },
+    }),
+  });
+  const upgrading = createSave(db, "https://x.com/a/status/6");
+  updateSave(db, upgrading.id, {
+    status: "done",
+    kind: "idea",
+    summary: "still here",
+    action_result_json: JSON.stringify({ sorted: { source: "heuristic", upgrade: "pending" }, act: { status: "skipped" } }),
+  });
 
-  assert.equal(failStuckSaves(db), 3);
+  assert.deepEqual(failStuckSaves(db), { failed: 3, restored: 1, cleared: 1, total: 4 });
   assert.equal(getStatus(db, queued.id), "failed");
   assert.equal(getStatus(db, sorting.id), "failed");
   assert.equal(getStatus(db, acting.id), "failed");
   const finished = db.prepare("SELECT status, kind, summary FROM saves WHERE id = ?").get(done.id);
   assert.deepEqual(finished, { status: "done", kind: "paper", summary: "kept" });
+  const restored = db.prepare("SELECT status, kind, summary, author, error, action_result_json FROM saves WHERE id = ?").get(rerunning.id);
+  assert.equal(restored.status, "done");
+  assert.equal(restored.kind, "repo");
+  assert.equal(restored.summary, "kept");
+  assert.equal(restored.author, "Hasan");
+  assert.equal(restored.error, null);
+  assert.equal(JSON.parse(restored.action_result_json).sorted.upgrade, null);
+  const cleared = db.prepare("SELECT status, summary, action_result_json FROM saves WHERE id = ?").get(upgrading.id);
+  assert.equal(cleared.status, "done");
+  assert.equal(cleared.summary, "still here");
+  assert.equal(JSON.parse(cleared.action_result_json).sorted.upgrade, null);
   db.close();
 });
 
@@ -144,6 +173,168 @@ test("a seed card is sorted from the fixture while live fetch is still pending",
   assert.ok(Date.now() - started < 1500);
 });
 
+test("a slow Grok call saves the heuristic first and the live refresh does not call Grok again", async (t) => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "saves-grok-"));
+  const url = "https://x.com/hasantoxr/status/2025902150296236050";
+  let grokCalls = 0;
+  let releaseGrok = () => {};
+  let grok = armGrok((release) => {
+    releaseGrok = release;
+  });
+  let releaseLive = () => {};
+  const liveGate = new Promise((resolve) => {
+    releaseLive = resolve;
+  });
+  const db = openDb(":memory:");
+  const app = createApp(db, {
+    env: { XAI_API_KEY: "test-key" },
+    cacheDir,
+    runRepo: instantRepoRun(),
+    fetchImpl: async (url) => {
+      await liveGate;
+      return liveScrapling(url);
+    },
+    llmFetch: async (_url, init) => {
+      grokCalls += 1;
+      const body = JSON.parse(init.body);
+      assert.equal(body.reasoning_effort, "low");
+      assert.equal(body.temperature, 0);
+      assert.deepEqual(body.response_format, { type: "json_object" });
+      await grok;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  kind: "tool",
+                  summary: "Grok calls Scrapling a tool.",
+                  repo_url: "https://github.com/D4Vinci/Scrapling",
+                  paper_url: null,
+                  tool_url: null,
+                  date: null,
+                }),
+              },
+            },
+          ],
+        }),
+      };
+    },
+  });
+  const { base, close } = await listen(app);
+  t.after(async () => {
+    releaseLive();
+    releaseGrok();
+    await close();
+  });
+
+  const started = Date.now();
+  const created = await postJson(base, url);
+  const id = (await created.json()).id;
+  const first = await waitUntil(base, id, (row) => row.status === "done" && row.action_result_json.sorted.upgrade === "pending");
+  assert.equal(first.kind, "repo");
+  assert.equal(first.action_result_json.sorted.source, "heuristic");
+  assert.equal(first.action_result_json.sorted.details.repo_url, "https://github.com/D4Vinci/Scrapling");
+  assert.ok(Date.now() - started < 1500);
+
+  releaseLive();
+  const refreshed = await waitUntil(base, id, (row) => String(row.author || "").includes("Live"));
+  assert.equal(grokCalls, 1);
+  assert.equal(refreshed.action_result_json.sorted.source, "heuristic");
+  const detail = await fetch(`${base}/saves/${id}`).then((response) => response.text());
+  assert.match(detail, /location\.reload/);
+  assert.doesNotMatch(detail, /http-equiv="refresh"/);
+  const cards = await fetch(`${base}/feed/cards`).then((response) => response.text());
+  assert.match(cards, /data-upgrade="pending"/);
+
+  releaseGrok();
+  const upgraded = await waitUntil(base, id, (row) => row.action_result_json.sorted.source === "llm");
+  assert.equal(upgraded.kind, "tool");
+  assert.equal(upgraded.summary, "Grok calls Scrapling a tool.");
+  assert.equal(upgraded.action_result_json.sorted.upgrade, "done");
+  assert.equal(upgraded.action_result_json.sorted.details.repo_url, "https://github.com/D4Vinci/Scrapling");
+  assert.equal(grokCalls, 1);
+  const quiet = await fetch(`${base}/saves/${id}`).then((response) => response.text());
+  assert.doesNotMatch(quiet, /location\.reload/);
+
+  grok = armGrok((release) => {
+    releaseGrok = release;
+  });
+  const rerun = await fetch(`${base}/api/saves/${id}/rerun`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+  });
+  assert.equal((await rerun.json()).status, "queued");
+  const queuedPage = await fetch(`${base}/saves/${id}`).then((response) => response.text());
+  assert.match(queuedPage, /location\.reload/);
+  releaseGrok();
+  const again = await waitUntil(base, id, (row) => row.status === "done" && row.action_result_json.sorted.source === "llm");
+  assert.equal(grokCalls, 2);
+  assert.equal(again.kind, "tool");
+});
+
+test("live refresh keeps Scrapling as a repo when x.com returns no reply", async (t) => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "saves-noreply-"));
+  const url = "https://x.com/hasantoxr/status/2025902150296236050";
+  let releaseLive = () => {};
+  const liveGate = new Promise((resolve) => {
+    releaseLive = resolve;
+  });
+  let sawStatusPage = false;
+  const db = openDb(":memory:");
+  const app = createApp(db, {
+    env: {},
+    cacheDir,
+    runRepo: instantRepoRun(),
+    fetchImpl: async (target) => {
+      await liveGate;
+      const href = String(target);
+      if (href === "https://api.fxtwitter.com/status/2025902150296236050") {
+        return {
+          ok: true,
+          json: async () => ({
+            tweet: {
+              id: "2025902150296236050",
+              text: "Scrapling without the reply. pip install scrapling",
+              author: { name: "Hasan Live", screen_name: "hasantoxr" },
+            },
+          }),
+        };
+      }
+      if (href.startsWith("https://x.com/") || href.startsWith("https://twitter.com/")) {
+        sawStatusPage = true;
+        return { ok: true, text: async () => "" };
+      }
+      throw new Error(`unexpected ${href}`);
+    },
+  });
+  const { base, close } = await listen(app);
+  t.after(async () => {
+    releaseLive();
+    await close();
+  });
+
+  const created = await postJson(base, url);
+  const id = (await created.json()).id;
+  const first = await waitUntilSettled(base, id);
+  assert.equal(first.kind, "repo");
+  assert.equal(first.action_result_json.sorted.details.repo_url, "https://github.com/D4Vinci/Scrapling");
+
+  releaseLive();
+  const refreshed = await waitUntil(
+    base,
+    id,
+    (row) => String(row.author || "").includes("Live") && row.status === "done",
+  );
+  assert.equal(sawStatusPage, true);
+  assert.equal(refreshed.status, "done");
+  assert.equal(refreshed.kind, "repo");
+  assert.equal(refreshed.action_result_json.sorted.details.repo_url, "https://github.com/D4Vinci/Scrapling");
+  assert.equal(refreshed.action_result_json.act.repo_url, "https://github.com/D4Vinci/Scrapling");
+});
+
 test("sanitized env keeps PATH and drops API keys", () => {
   const env = sanitizedEnv({
     PATH: "/usr/bin",
@@ -159,6 +350,62 @@ test("sanitized env keeps PATH and drops API keys", () => {
   assert.equal(JSON.stringify(env).includes("secret"), false);
   assert.equal(env.XAI_API_KEY, undefined);
 });
+
+function instantRepoRun() {
+  return async () => ({
+    error: null,
+    warning: null,
+    stdout: "ran",
+    screenshot_path: "/screenshots/scrapling-seed.png",
+    action_result_json: {
+      stdout: "ran",
+      timestamp: "2026-10-20T02:20:00.000Z",
+      repo: "https://github.com/D4Vinci/Scrapling",
+    },
+  });
+}
+
+function armGrok(capture) {
+  return new Promise((resolve) => {
+    capture(resolve);
+  });
+}
+
+function liveScrapling(url) {
+  const target = String(url);
+  if (target === "https://api.fxtwitter.com/status/2025902150296236050") {
+    return {
+      ok: true,
+      json: async () => ({
+        tweet: {
+          id: "2025902150296236050",
+          text: "Scrapling live refresh text for the card.",
+          author: { name: "Hasan Toor Live", screen_name: "hasantoxr" },
+          url: "https://x.com/hasantoxr/status/2025902150296236050",
+        },
+      }),
+      text: async () => "",
+    };
+  }
+  if (target === "https://x.com/hasantoxr/status/2025902150296236050") {
+    return { ok: true, text: async () => `<a href="/hasantoxr/status/2025902162409316607">reply</a>` };
+  }
+  if (target === "https://api.fxtwitter.com/status/2025902162409316607") {
+    return {
+      ok: true,
+      json: async () => ({
+        tweet: {
+          id: "2025902162409316607",
+          text: "Link: https://github.com/D4Vinci/Scrapling",
+          author: { name: "Hasan Toor Live", screen_name: "hasantoxr" },
+          replying_to_status: "2025902150296236050",
+        },
+      }),
+      text: async () => "",
+    };
+  }
+  throw new Error(`unexpected ${target}`);
+}
 
 function jackFetch(url) {
   if (url === "https://api.fxtwitter.com/status/20") {
@@ -208,9 +455,13 @@ async function postJson(base, url) {
 }
 
 async function waitUntilSettled(base, id) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  return waitUntil(base, id, (body) => body.status === "done" || body.status === "failed");
+}
+
+async function waitUntil(base, id, ready) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
     const body = await fetch(`${base}/api/saves/${id}`).then((response) => response.json());
-    if (body.status === "done" || body.status === "failed") return body;
+    if (ready(body)) return body;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`save ${id} did not settle`);

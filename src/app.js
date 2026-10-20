@@ -19,6 +19,9 @@ export function createApp(db, options = {}) {
     llm: options.llm ?? llmSettings(source),
     childEnv: options.childEnv ?? sanitizedEnv(source),
     llmFetch: options.llmFetch,
+    runRepo: options.runRepo,
+    demoBudgetMs: options.demoBudgetMs,
+    screenshotDir: options.screenshotDir,
   };
   const app = express();
   app.disable("x-powered-by");

@@ -81,9 +81,9 @@ export async function ingest(input, options = {}) {
 
   try {
     let live = await fetchLive(parsed, fetchImpl);
-    live = await expandPostLinks(live, fetchImpl);
     const fixture = loadFixture(parsed.id, options.fixturesDir);
     if (fixture) live = mergeFixture(live, fixture);
+    live = await expandPostLinks(live, fetchImpl);
     writeCachedPost(live, options.cacheDir);
     return live;
   } catch {
@@ -282,7 +282,11 @@ function normalizeFixture(raw) {
 function mergeFixture(live, fixture) {
   const links = [...(live.links || [])];
   const seen = new Set(links.map((link) => link.expanded));
-  for (const link of fixture.links || []) {
+  const extras = [
+    ...(fixture.links || []),
+    ...(fixture.replies || []).flatMap((reply) => reply.links || []),
+  ];
+  for (const link of extras) {
     if (link.expanded && !seen.has(link.expanded)) {
       seen.add(link.expanded);
       links.push(link);

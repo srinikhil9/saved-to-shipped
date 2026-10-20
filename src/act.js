@@ -11,7 +11,8 @@ import { runRepo } from "./runner/runRepo.js";
  * kind=repo clones, installs, and runs in a temp dir. Child processes get
  * the runner's own allowlist (src/runner/env.js), not sanitizedEnv() and
  * not process.env. A missed screenshot is a warning. A failed or over-budget
- * live run falls back to the committed fixture, then the previous good row.
+ * live run keeps the row's own last good run. The committed fixture is only
+ * used when that row has none.
  */
 export async function act(save, options = {}) {
   if (save.kind === "repo") return actOnRepo(save, options);
@@ -80,9 +81,9 @@ export async function actOnRepo(save, options = {}) {
     };
   }
 
-  const cached = loadCachedRepoRun(repoUrl, { screenshotDir });
   const previous = lastGoodRun(save.previous);
-  const good = cached || previous;
+  const cached = loadCachedRepoRun(repoUrl, { screenshotDir });
+  const good = previous || cached;
   if (good) {
     const replay = asCachedReplay({ ...good, repo_url: good.repo_url || repoUrl }, result.error);
     const failed = result.action_result_json || {};

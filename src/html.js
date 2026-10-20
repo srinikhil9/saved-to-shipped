@@ -1,7 +1,7 @@
 const KINDS = ["repo", "tool", "paper", "idea", "event", "other"];
 
 export function renderFeed(saves) {
-  const pending = saves.some((save) => isPending(save.status));
+  const pending = saves.some((save) => needsRefresh(save));
   return layout({
     title: "Saved to Shipped",
     body: `
@@ -49,7 +49,7 @@ export function renderFeed(saves) {
         async function refresh() {
           const response = await fetch("/feed/cards");
           cards.innerHTML = await response.text();
-          const stillPending = cards.querySelector("[data-status='queued'], [data-status='sorting'], [data-status='acting']");
+          const stillPending = cards.querySelector("[data-status='queued'], [data-status='sorting'], [data-status='acting'], [data-upgrade='pending']");
           cards.dataset.pending = stillPending ? "1" : "0";
           if (stillPending) setTimeout(refresh, 800);
         }
@@ -112,6 +112,7 @@ export function renderDetail(save) {
           <button type="submit">Run again</button>
         </form>
       </article>
+      ${needsRefresh(save) ? `<script>setTimeout(function () { location.reload(); }, 800);</script>` : ""}
     `,
   });
 }
@@ -120,7 +121,7 @@ function renderCard(save) {
   const action = parseAction(save);
   const repo = action?.sorted?.details?.repo_url;
   return `
-    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}">
+    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}"${upgradeAttr(save)}>
       <div class="meta">
         ${save.kind ? badge(save.kind) : `<span class="badge other">Unsorted</span>`}
         ${statusPill(save.status)}
@@ -378,4 +379,16 @@ function escapeHtml(value) {
 
 function isPending(status) {
   return status === "queued" || status === "sorting" || status === "acting";
+}
+
+function needsRefresh(save) {
+  return isPending(save.status) || upgradeOf(save) === "pending";
+}
+
+function upgradeAttr(save) {
+  return upgradeOf(save) === "pending" ? ` data-upgrade="pending"` : "";
+}
+
+function upgradeOf(save) {
+  return parseAction(save)?.sorted?.upgrade || null;
 }
