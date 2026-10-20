@@ -45,7 +45,18 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
     "https://drive.google.com/file/d/1qzKI4DKnyHRpXK1J3ATPqwaqLc0iNu-M/view?usp=sharing",
   );
   assert.equal(done[0].status, "done");
-  assert.equal(done[0].why_you, null);
+  assert.equal(
+    done[0].why_you,
+    "Drop-in for your social-data scraping pipeline: use it to pull user posts at scale for product recommendations.",
+  );
+  assert.equal(
+    done[1].why_you,
+    "A blueprint for running your scrape-and-recommend agents as a self-verifying loop; Saved to Shipped is one.",
+  );
+  assert.equal(
+    done[2].why_you,
+    "Turn your saved posts, founders, and YC/a16z products into a living wiki your recommender can draw on.",
+  );
   assert.equal(done[0].error, null);
   assert.equal(done[0].action_result_json.act.status, "cached");
   assert.equal(done[0].action_result_json.act.repo, "https://github.com/D4Vinci/Scrapling");
@@ -74,11 +85,16 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   assert.match(html, /data-kind="idea"/);
   assert.match(html, /Hasan Toor/);
   assert.match(html, /github\.com\/D4Vinci\/Scrapling/);
+  assert.match(html, /Drop-in for your social-data scraping pipeline/);
+  assert.match(html, /self-verifying loop/);
+  assert.match(html, /living wiki your recommender can draw on/);
 
   const detail = await fetch(`${base}/saves/${ids[0]}`);
   const detailHtml = await detail.text();
   assert.match(detailHtml, /Show last run/);
   assert.doesNotMatch(detailHtml, /location\.reload/);
+  assert.match(detailHtml, /Why you/);
+  assert.match(detailHtml, /social-data scraping pipeline/);
   assert.match(detailHtml, /scrapling-seed\.png/);
   assert.match(detailHtml, /id="stdout"/);
   const quote = done[0].action_result_json.act.extracted_sample[0].slice(0, 24);

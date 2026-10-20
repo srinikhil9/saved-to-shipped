@@ -11,6 +11,8 @@ const COLUMNS = new Set([
   "status",
   "summary",
   "why_you",
+  "why_you_source",
+  "why_you_profile_hash",
   "action_result_json",
   "screenshot_path",
   "error",
@@ -33,11 +35,16 @@ export function openDb(dbPath = ":memory:") {
       status TEXT NOT NULL,
       summary TEXT,
       why_you TEXT,
+      why_you_source TEXT,
+      why_you_profile_hash TEXT,
       action_result_json TEXT,
       screenshot_path TEXT,
       error TEXT
     );
   `);
+  const have = new Set(db.prepare("PRAGMA table_info(saves)").all().map((column) => column.name));
+  if (!have.has("why_you_source")) db.exec("ALTER TABLE saves ADD COLUMN why_you_source TEXT");
+  if (!have.has("why_you_profile_hash")) db.exec("ALTER TABLE saves ADD COLUMN why_you_profile_hash TEXT");
   return db;
 }
 
@@ -108,6 +115,7 @@ export function failStuckSaves(db) {
       cleared += 1;
     }
   }
+  db.prepare("UPDATE saves SET why_you_source = 'template' WHERE why_you_source = 'pending'").run();
   return { failed, restored, cleared, total: stuck.length };
 }
 
@@ -144,6 +152,8 @@ export function publicSave(row) {
     status: row.status,
     summary: row.summary,
     why_you: row.why_you,
+    why_you_source: row.why_you_source,
+    why_you_profile_hash: row.why_you_profile_hash,
     action_result_json: action,
     screenshot_path: row.screenshot_path,
     error: row.error,

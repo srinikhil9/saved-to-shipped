@@ -5,20 +5,26 @@ import { renderCards, renderDetail, renderFeed, renderNotFound } from "./html.js
 import { paths } from "./paths.js";
 import { loadProfile } from "./profile.js";
 import { runPipeline } from "./pipeline.js";
+import { backfillWhyYou } from "./why.js";
 import { parseXStatusUrl } from "./xurl.js";
 
 export function createApp(db, options = {}) {
-  loadProfile();
   const source = options.env ?? process.env;
+  const profile = options.profile || loadProfile();
+  backfillWhyYou(db, profile);
   const pipelineOptions = {
     offline: options.offline === true,
     fetchImpl: options.fetchImpl,
     fixturesDir: options.fixturesDir,
     cacheDir: options.cacheDir,
     awaitLive: options.awaitLive === true,
+    awaitWhy: options.awaitWhy === true,
     llm: options.llm ?? llmSettings(source),
     childEnv: options.childEnv ?? sanitizedEnv(source),
     llmFetch: options.llmFetch,
+    whyFetch: options.whyFetch,
+    whyTimeoutMs: options.whyTimeoutMs,
+    profile,
     runRepo: options.runRepo,
     demoBudgetMs: options.demoBudgetMs,
     screenshotDir: options.screenshotDir,

@@ -2,23 +2,26 @@ import { act } from "./act.js";
 import { classifyHeuristic, classifyWithGrok } from "./classify.js";
 import { getSave, updateSave } from "./db.js";
 import { expandPostLinks } from "./expand.js";
+import { combinedText, ingest, readSavedPost } from "./ingest.js";
+import { loadProfile } from "./profile.js";
 import { asCachedReplay, lastGoodRun } from "./runner/fallback.js";
 import { isOffline } from "./runner/python.js";
-import { combinedText, ingest, readSavedPost } from "./ingest.js";
+import { refreshWhyYou, storeWhyLine } from "./why.js";
 
 const generations = new WeakMap();
 const flights = new WeakMap();
+const upgrades = new WeakMap();
+const whyJobs = new WeakMap();
 
 /**
- * Stages for one save: ingest → sort → act.
- * Relate (why_you, from data/profile.json) is a later step and stays null.
+ * Stages for one save: ingest → sort → why_you → act.
  * A saved copy is sorted immediately from the committed repo run when one
- * exists. A live read, when it succeeds, may replace that run. A failed or
+ * exists. A live read, when it succeeds, replaces that run. A failed or
  * over-budget live run keeps the row's own last good run, then the fixture.
  *
- * The regex result is stored before Grok is called. One Grok flight runs per
- * pipeline generation, so the live refresh does not call Grok again. Grok
- * re-runs the repo only when the kind or repo URL changed.
+ * The regex result, including its template why_you, is stored before Grok.
+ * One Grok flight runs per pipeline generation. Grok re-runs the repo only
+ * when the kind or repo URL changed.
  */
 export async function runPipeline(db, id, options = {}) {
   const existing = getSave(db, id);
@@ -37,6 +40,7 @@ export async function runPipeline(db, id, options = {}) {
         const pending = refreshFromLive(db, id, existing.url, runOptions);
         if (runOptions.awaitLive) await pending;
         await upgradeFor(db, id, generation);
+        if (runOptions.awaitWhy) await whyFor(db, id);
         return getSave(db, id) || done;
       }
     }
@@ -46,20 +50,11 @@ export async function runPipeline(db, id, options = {}) {
       repoMode: runOptions.repoMode || (runOptions.offline ? "cache" : "live"),
     });
     await upgradeFor(db, id, generation);
+    if (runOptions.awaitWhy) await whyFor(db, id);
     return getSave(db, id) || done;
   } catch (error) {
     if (snapshot.kind && snapshot.action_result_json) {
-      return updateSave(db, id, {
-        status: "done",
-        author: snapshot.author,
-        text: snapshot.text,
-        kind: snapshot.kind,
-        summary: snapshot.summary,
-        why_you: snapshot.why_you,
-        action_result_json: snapshot.action_result_json,
-        screenshot_path: snapshot.screenshot_path,
-        error: null,
-      });
+      return restoreSnapshot(db, id, snapshot);
     }
     return updateSave(db, id, {
       status: "failed",
@@ -94,17 +89,7 @@ async function storeSorted(db, id, post, options) {
   const failed = action?.status === "failed";
   if (failed && snapshot?.kind && snapshot?.action_result_json) {
     const preserved = preserveGood(snapshot, action.error);
-    return updateSave(db, id, {
-      status: "done",
-      author: snapshot.author,
-      text: snapshot.text,
-      kind: snapshot.kind,
-      summary: snapshot.summary,
-      why_you: snapshot.why_you,
-      screenshot_path: preserved.screenshot_path,
-      action_result_json: preserved.json,
-      error: null,
-    });
+    return restoreSnapshot(db, id, snapshot, preserved);
   }
 
   const latest = getSave(db, id);
@@ -112,6 +97,7 @@ async function storeSorted(db, id, post, options) {
   const storedAct = plan.keepAct && action?.status !== "ok" && !action?.attempt_error ? plan.keepAct : action;
   const screenshotPath =
     storedAct?.screenshot_path || (storedAct?.warning ? snapshot?.screenshot_path || latest?.screenshot_path || null : null);
+  rememberSortedWhy(db, id, post, plan, options);
   const saved = updateSave(db, id, {
     status: failed ? "failed" : "done",
     kind: plan.kind,
@@ -155,18 +141,23 @@ function refreshFromLive(db, id, url, options) {
       const snapshot = options.snapshot;
       if (!lastGoodRun(snapshot)) return;
       const preserved = preserveGood(snapshot, error instanceof Error ? error.message : String(error));
-      updateSave(db, id, {
-        status: "done",
-        author: snapshot.author,
-        text: snapshot.text,
-        kind: snapshot.kind,
-        summary: snapshot.summary,
-        why_you: snapshot.why_you,
-        screenshot_path: preserved.screenshot_path,
-        action_result_json: preserved.json,
-        error: null,
-      });
+      restoreSnapshot(db, id, snapshot, preserved);
     });
+}
+
+function rememberSortedWhy(db, id, post, plan, options) {
+  const profile = options.profile || loadProfile();
+  const latest = getSave(db, id);
+  const save = {
+    id,
+    url: post?.url || latest?.url,
+    author: formatAuthor(post) || latest?.author,
+    text: post?.text || latest?.text || "",
+    kind: plan.kind,
+    summary: plan.summary,
+  };
+  storeWhyLine(db, id, save, profile);
+  rememberWhy(db, id, refreshWhyYou(db, id, save, profile, options));
 }
 
 function preserveGood(snapshot, attemptError) {
@@ -184,6 +175,22 @@ function preserveGood(snapshot, attemptError) {
     screenshot_path: acted.screenshot_path,
     json: JSON.stringify({ ...parsed, act: acted }),
   };
+}
+
+function restoreSnapshot(db, id, snapshot, preserved = null) {
+  return updateSave(db, id, {
+    status: "done",
+    author: snapshot.author,
+    text: snapshot.text,
+    kind: snapshot.kind,
+    summary: snapshot.summary,
+    why_you: snapshot.why_you,
+    why_you_source: snapshot.why_you_source === "pending" ? "template" : snapshot.why_you_source,
+    why_you_profile_hash: snapshot.why_you_profile_hash,
+    screenshot_path: preserved ? preserved.screenshot_path : snapshot.screenshot_path,
+    action_result_json: preserved ? preserved.json : snapshot.action_result_json,
+    error: null,
+  });
 }
 
 function preserveSeedRepo(row, heuristic) {
@@ -250,15 +257,17 @@ async function applyUpgrade(db, id, generation, upgraded, options) {
   latestAction.sorted.details = nextDetails;
   latestAction.sorted.upgrade = "done";
   latestAction.act = acted;
+  const summary = upgraded.summary || latest.summary;
   const patch = {
     status: "done",
     kind: upgraded.kind,
-    summary: upgraded.summary || latest.summary,
+    summary,
     action_result_json: JSON.stringify(latestAction),
     error: null,
   };
   if (acted?.screenshot_path) patch.screenshot_path = acted.screenshot_path;
   updateSave(db, id, patch);
+  rememberSortedWhy(db, id, { url: latest.url, author: latest.author, text: latest.text }, { kind: upgraded.kind, summary }, options);
 }
 
 function planSort(row, heuristic, generation, llm) {
@@ -323,8 +332,6 @@ function reserveFlight(db, id, generation) {
   return true;
 }
 
-const upgrades = new WeakMap();
-
 function rememberUpgrade(db, id, generation, promise) {
   let byId = upgrades.get(db);
   if (!byId) {
@@ -336,6 +343,22 @@ function rememberUpgrade(db, id, generation, promise) {
 
 function upgradeFor(db, id, generation) {
   return upgrades.get(db)?.get(`${id}:${generation}`) || Promise.resolve();
+}
+
+function rememberWhy(db, id, promise) {
+  let byId = whyJobs.get(db);
+  if (!byId) {
+    byId = new Map();
+    whyJobs.set(db, byId);
+  }
+  const previous = byId.get(id) || Promise.resolve();
+  const job = Promise.resolve(previous).then(() => promise);
+  byId.set(id, job);
+  return job;
+}
+
+function whyFor(db, id) {
+  return whyJobs.get(db)?.get(id) || Promise.resolve();
 }
 
 function parseAction(json) {
@@ -354,12 +377,15 @@ function snapshotOf(row) {
     kind: row.kind,
     summary: row.summary,
     why_you: row.why_you,
+    why_you_source: row.why_you_source,
+    why_you_profile_hash: row.why_you_profile_hash,
     action_result_json: row.action_result_json,
     screenshot_path: row.screenshot_path,
   };
 }
 
 function formatAuthor(post) {
+  if (!post) return null;
   if (post.author && post.handle) return `${post.author} (@${post.handle})`;
   return post.author || (post.handle ? `@${post.handle}` : null);
 }

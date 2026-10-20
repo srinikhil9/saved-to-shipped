@@ -2,5 +2,15 @@
   "name": "Srinikhil",
   "summary": "Srinikhil is building a startup that scrapes users' social media data to recommend niche consumer products from YC / a16z startups.",
   "building": "a startup that scrapes users' social media data to recommend niche consumer products from YC / a16z startups",
-  "used_for": "The relevance step writes why_you from this profile. Step 1 stores it and does not call that step yet."
+  "used_for": "Templates fill why_you immediately. Grok rewrites the line when XAI_API_KEY is set.",
+  "why": {
+    "focus": "your social-data recommender",
+    "pipeline": "social-data scraping pipeline",
+    "use": "pull user posts at scale for product recommendations",
+    "agents": "scrape-and-recommend agents",
+    "product": "Saved to Shipped",
+    "memory": "saved posts, founders, and YC/a16z products",
+    "wiki": "living wiki",
+    "reader": "recommender"
+  }
 }

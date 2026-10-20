@@ -49,7 +49,7 @@ export function renderFeed(saves) {
         async function refresh() {
           const response = await fetch("/feed/cards");
           cards.innerHTML = await response.text();
-          const stillPending = cards.querySelector("[data-status='queued'], [data-status='sorting'], [data-status='acting'], [data-upgrade='pending']");
+          const stillPending = cards.querySelector("[data-status='queued'], [data-status='sorting'], [data-status='acting'], [data-upgrade='pending'], [data-why='pending']");
           cards.dataset.pending = stillPending ? "1" : "0";
           if (stillPending) setTimeout(refresh, 800);
         }
@@ -102,7 +102,7 @@ export function renderDetail(save) {
           ${detailRow("Sorted by", action?.sorted?.source)}
         </dl>
         ${renderLinks(links)}
-        ${save.why_you ? `<h2>Why you</h2><p>${escapeHtml(save.why_you)}</p>` : ""}
+        ${save.why_you ? `<h2>Why you</h2><p class="why">${escapeHtml(save.why_you)}</p>` : ""}
         <h2>Show last run</h2>
         <div class="last-run">
           ${renderLastRun(save, act)}
@@ -121,13 +121,14 @@ function renderCard(save) {
   const action = parseAction(save);
   const repo = action?.sorted?.details?.repo_url;
   return `
-    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}"${upgradeAttr(save)}>
+    <article class="card" data-status="${escapeHtml(save.status || "")}" data-kind="${escapeHtml(save.kind || "")}" data-why="${save.why_you_source === "pending" ? "pending" : ""}"${upgradeAttr(save)}>
       <div class="meta">
         ${save.kind ? badge(save.kind) : `<span class="badge other">Unsorted</span>`}
         ${statusPill(save.status)}
       </div>
       <h2><a href="/saves/${save.id}">${escapeHtml(cardTitle(save))}</a></h2>
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
+      ${save.why_you ? `<p class="why">${escapeHtml(save.why_you)}</p>` : ""}
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
       ${action?.act?.status === "cached" ? `<span class="badge other">cached</span>` : ""}
       ${action?.act?.fallback_note ? `<p class="repo">${escapeHtml(action.act.fallback_note)}</p>` : ""}
@@ -228,6 +229,7 @@ function layout({ title, body }) {
     .brand { margin: 0; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; color: var(--accent); font-weight: 700; }
     h1 { font-family: Palatino, "Iowan Old Style", Georgia, serif; font-size: 42px; line-height: 1.05; margin: 6px 0 8px; }
     .lede, .summary { color: var(--muted); }
+    .why { margin: 8px 0 0; }
     .paste, .card, .detail, .last-run {
       background: var(--card);
       border: 1px solid var(--line);
@@ -377,12 +379,14 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function isPending(status) {
-  return status === "queued" || status === "sorting" || status === "acting";
+function isPending(save) {
+  const status = typeof save === "string" ? save : save?.status;
+  if (status === "queued" || status === "sorting" || status === "acting") return true;
+  return save?.why_you_source === "pending";
 }
 
 function needsRefresh(save) {
-  return isPending(save.status) || upgradeOf(save) === "pending";
+  return isPending(save) || upgradeOf(save) === "pending";
 }
 
 function upgradeAttr(save) {

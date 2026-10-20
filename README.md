@@ -54,7 +54,7 @@ The detail page reloads on its own while a save is still running or a Grok upgra
 
 SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `sorting`, `acting`, `done`, `failed`), summary, why_you, action_result_json, screenshot_path, error.
 
-`data/profile.json` is Srinikhil's profile for the later "why you" step. `why_you` stays empty for now.
+`data/profile.json` is Srinikhil's profile. After a save is sorted, on either the Grok sort path or the no-key path, the pipeline writes a one-line `why_you` immediately: a short template per kind (`your social-data recommender`) plus keyword hits that cover the likely kinds for each seed (a scraping repo or tool, Loop Engineering as a paper or idea, the second brain as an idea, paper, or other). When `XAI_API_KEY` is set, Grok (`https://api.x.ai/v1`, `grok-4.7`, `reasoning_effort: low`, about 8 seconds) rewrites that line in the background from the profile and the post summary. The Grok line is stored on the row (`why_you_source` + profile hash) and reused offline, so a replay does not call again. No key, a timeout, or an error leaves the template. Empty rows that already have a kind are filled on startup, on seed, or on rerun. The line shows on the feed card and the detail page.
 
 `src/act.js` runs repos. Paper, idea, tool, and event actions are still stubs.
 
