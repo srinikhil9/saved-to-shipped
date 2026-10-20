@@ -53,6 +53,16 @@ export function createApp(db, options = {}) {
     res.type("html").send(renderDetail(save));
   });
 
+  app.get("/saves/:id/event.ics", (req, res) => {
+    const save = loadRow(db, req.params.id);
+    const act = save ? calendarAct(save) : null;
+    if (!act?.ics) return res.status(404).type("text").send("No calendar file");
+    const name = String(act.ics_filename || "event.ics").replace(/[^A-Za-z0-9._-]/g, "") || "event.ics";
+    res.set("content-type", "text/calendar; charset=utf-8");
+    res.set("content-disposition", `attachment; filename="${name}"`);
+    res.send(act.ics);
+  });
+
   app.post("/api/saves", (req, res) => {
     const parsed = parseXStatusUrl(readUrl(req));
     if (!parsed) {
@@ -156,6 +166,15 @@ function publicBase(req, source) {
   const forwarded = req.get("x-forwarded-proto");
   const proto = forwarded ? forwarded.split(",")[0].trim() : req.protocol || "http";
   return `${proto}://${host}`;
+}
+
+function calendarAct(save) {
+  if (!save?.action_result_json) return null;
+  try {
+    return JSON.parse(save.action_result_json).act || null;
+  } catch {
+    return null;
+  }
 }
 
 function loadRow(db, id) {

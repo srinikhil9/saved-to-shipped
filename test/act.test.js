@@ -370,8 +370,14 @@ test("offline repo replays its cache and the zip link only accepts artifact path
     { env: {}, offline: true },
   );
   assert.equal(replay.status, "cached");
-  const skipped = await act({ kind: "tool", url: "https://example.com", details: {} }, { env: {} });
-  assert.equal(skipped.status, "skipped");
+  const tool = await act({ kind: "tool", url: "https://example.com", text: "A small utility.", details: {} }, { env: {} });
+  assert.equal(tool.status, "ok");
+  assert.equal(tool.verdict, "Try it: follow the steps in the post");
+  assert.deepEqual(tool.steps, [
+    "Open the product linked in the post.",
+    "Do the one task the post says it handles.",
+    "Note what to hand your recommender.",
+  ]);
   assert.equal(renderZipLink({ zipUrl: "javascript:alert(1)" }), "");
   assert.equal(renderZipLink({ zipUrl: "https://evil.example/loop.zip" }), "");
   const link = renderZipLink({ zipUrl: "/artifacts/2069736449902027136/loop-engineering.zip", type: "spec" });

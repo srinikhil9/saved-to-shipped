@@ -16,6 +16,25 @@ process.on("exit", () => {
 
 const URL = "https://x.com/hasantoxr/status/2025902150296236050";
 
+test("a README-only cache skips the live install and does not claim a run time", async () => {
+  let ran = false;
+  const action = await actOnRepo(
+    { id: 9, details: { repo_url: "https://github.com/trycua/cua" } },
+    {
+      repoMode: "live",
+      runRepo: async () => {
+        ran = true;
+        return { error: "should not clone" };
+      },
+    },
+  );
+  assert.equal(ran, false);
+  assert.equal(action.status, "cached");
+  assert.equal(action.fallback_note, "README cached, live install skipped");
+  assert.equal(action.smoke_source, "readme");
+  assert.ok(action.skipped_live_install);
+});
+
 test("a screenshot failure does not fail the run", async () => {
   const action = await actOnRepo(
     { id: 7, details: { repo_url: "https://github.com/D4Vinci/Scrapling" } },

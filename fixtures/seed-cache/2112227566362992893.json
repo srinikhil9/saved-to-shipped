@@ -1,0 +1,20 @@
+{
+  "id": "2112227566362992893",
+  "url": "https://x.com/alymoursy/status/2112227566362992893",
+  "kind": "tool",
+  "summary": "Today we're launching @VeezaAI (YC F26) - an AI tourist visa agent for people with weak passports.",
+  "verdict": "Try it: pick a destination and let it file the visa",
+  "why_you": "Veeza is the kind of YC consumer product your recommender should surface to the right users.",
+  "why_you_source": "template",
+  "act": {
+    "status": "ok",
+    "verdict": "Try it: pick a destination and let it file the visa",
+    "tool_url": "https://www.veeza.ai",
+    "steps": [
+      "Open https://www.veeza.ai.",
+      "Pick the destination.",
+      "Let Veeza do the paperwork and book the appointment."
+    ],
+    "screenshot_path": null
+  }
+}

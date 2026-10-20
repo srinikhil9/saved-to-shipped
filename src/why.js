@@ -192,6 +192,21 @@ export function storeWhyLine(db, id, save, profile) {
 }
 
 function keywordLine(kind, blob, slots) {
+  if (/\bcua spaces\b|\bspaces sdk\b/i.test(blob)) {
+    return `Cua Spaces is infra for the scraping agents that pull social data for your YC/a16z product ${slots.reader}.`;
+  }
+  if (/\bwabi\b/i.test(blob)) {
+    return `Wabi is the kind of a16z consumer product your ${slots.reader} should surface to the right users.`;
+  }
+  if (/\bveeza\b/i.test(blob)) {
+    return `Veeza is the kind of YC consumer product your ${slots.reader} should surface to the right users.`;
+  }
+  if (/acceleratorcon/i.test(blob)) {
+    return "AcceleratorCON is where you meet the YC and a16z founders whose products feed your catalog.";
+  }
+  if (/\bfortress\b/i.test(blob)) {
+    return "Fortress is stealth-browser infra so your scraping agents stop getting blocked.";
+  }
   if ((kind === "repo" || kind === "tool") && /\bscrap/i.test(blob)) {
     return `Drop-in for your ${slots.pipeline}: use it to ${slots.use}.`;
   }

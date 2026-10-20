@@ -22,8 +22,13 @@ Open http://localhost:3000 and paste one of the seed posts:
 - https://x.com/hasantoxr/status/2025902150296236050 — Scrapling, sorted as **repo**
 - https://x.com/0xCodez/status/2069736449902027136 — Loop Engineering, sorted as **paper**
 - https://x.com/cyrilXBT/status/2069651792678510894 — Karpathy's second brain, sorted as **idea**
+- https://x.com/trycua/status/2112228154651881479 — Cua Spaces SDK, sorted as **repo** (README cache; no live install)
+- https://x.com/ekuyda/status/2112212804979880239 — Wabi 2.0, sorted as **tool**
+- https://x.com/alymoursy/status/2112227566362992893 — Veeza AI, sorted as **tool**
+- https://x.com/seobrien/status/2111233458081251384 — AcceleratorCON, sorted as **event** (all-day `.ics`)
+- https://x.com/NextoraInsights/status/2112033075400184127 — Fortress, sorted as **tool**
 
-`npm run seed` loads those three fixtures into `data/saves.sqlite` through the same pipeline. It does not call the network. The Scrapling card replays a committed run (`fixtures/repo-runs/scrapling/`: stdout, screenshot, and JSON) so the detail page works offline. Pass `--live` to fetch the post from the network and actually clone and run the repo.
+`npm run seed` loads every fixture in `fixtures/` into `data/saves.sqlite` through the same pipeline. It does not call the network. The Scrapling card replays a committed run (`fixtures/repo-runs/scrapling/`: stdout, screenshot, and JSON). The Cua card replays a README summary (`fixtures/repo-runs/cua/`) and does not install the macOS app. Tool cards get template "try it" steps. The AcceleratorCON card links an all-day `.ics` for 2026-10-23 in New York, NY. Pass `--live` to fetch the post from the network and actually clone and run a repo that has no README-only cache.
 
 `POST /api/saves/:id/rerun` (or **Run again** on the detail page) sorts the save again. It does not clear the previous result first. Offline (`INGEST_OFFLINE=1` or `npm run seed`) replays the cache. A normal server run tries the repo, with a demo budget of 45 seconds (`DEMO_RUN_BUDGET_MS`). If that attempt fails or runs over the budget, the card stays on the last good run and says `showing last good run from <time>`. The failed attempt is kept on the act payload as `attempt_error` and does not replace stdout or the screenshot.
 
@@ -39,7 +44,7 @@ Live fetch tries, in order, with no X API key:
 
 `t.co` links are followed to their destination. If the post says the link is in a reply, the author's own reply on that post is read too. Scrapling's GitHub repo is in that first reply: https://github.com/D4Vinci/Scrapling
 
-A successful live read is written to `data/live-cache/` and reused when the network is down. The three files in `fixtures/` are the seed copies. `INGEST_OFFLINE=1` skips the network and uses the cache, then those fixtures. It does not clone, pip-install, or provision Python. Run again keeps the previous card when a refetch fails.
+A successful live read is written to `data/live-cache/` and reused when the network is down. The JSON files in `fixtures/` are the seed copies. `INGEST_OFFLINE=1` skips the network and uses the cache, then those fixtures. It does not clone, pip-install, or provision Python. Run again keeps the previous card when a refetch fails.
 
 ## Sort
 
@@ -55,9 +60,9 @@ The detail page reloads on its own while a save is still running or a Grok upgra
 
 SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `sorting`, `acting`, `done`, `failed`), summary, why_you, action_result_json, screenshot_path, error.
 
-`data/profile.json` is Srinikhil's profile. After a save is sorted, on either the Grok sort path or the no-key path, the pipeline writes a one-line `why_you` immediately: a short template per kind (`your social-data recommender`) plus keyword hits that cover the likely kinds for each seed (a scraping repo or tool, Loop Engineering as a paper or idea, the second brain as an idea, paper, or other). When `XAI_API_KEY` is set, Grok (`https://api.x.ai/v1`, `grok-4.7`, `reasoning_effort: low`, about 8 seconds) rewrites that line in the background from the profile and the post summary. The Grok line is stored on the row (`why_you_source` + profile hash) and reused offline, so a replay does not call again. No key, a timeout, or an error leaves the template. Empty rows that already have a kind are filled on startup, on seed, or on rerun. The line shows on the feed card and the detail page.
+`data/profile.json` is Srinikhil's profile. After a save is sorted, on either the Grok sort path or the no-key path, the pipeline writes a one-line `why_you` immediately: a short template per kind (`your social-data recommender`) plus keyword hits that cover the likely kinds for each seed (a scraping repo or tool, Loop Engineering as a paper or idea, the second brain as an idea, paper, or other, plus Cua, Wabi, Veeza, AcceleratorCON, and Fortress). When `XAI_API_KEY` is set, Grok (`https://api.x.ai/v1`, `grok-4.7`, `reasoning_effort: low`, about 8 seconds) rewrites that line in the background from the profile and the post summary. The Grok line is stored on the row (`why_you_source` + profile hash) and reused offline, so a replay does not call again. No key, a timeout, or an error leaves the template. Empty rows that already have a kind are filled on startup, on seed, or on rerun. The line shows on the feed card and the detail page.
 
-`src/act.js` runs repos, and writes a spec plus a starter zip for papers and ideas. Tool and event actions are still stubs.
+`src/act.js` runs repos, and writes a spec plus a starter zip for papers and ideas. A tool save gets a short "try it" list (template, no browser). An event save gets an all-day `.ics` at `/saves/:id/event.ics` (date-only, no clock time). The feed badge reads `Profile from Grok Bot memory` after a profile push, and `Default profile` otherwise. Feed cards show the kind, a one-line verdict, the why-you line, a truncated summary, and a compact link to the repo, try-it page, `.ics`, zip, or screenshot.
 
 ## Repo runner
 

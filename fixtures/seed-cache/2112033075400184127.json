@@ -1,0 +1,20 @@
+{
+  "id": "2112033075400184127",
+  "url": "https://x.com/NextoraInsights/status/2112033075400184127",
+  "kind": "tool",
+  "summary": "Hi @armanluthra26 — congrats on launching \"Fortress(Tilion YC F26): A stealth Chromium so your agents stop getting blocked\"!",
+  "verdict": "Try it: point scraping agents at stealth Chromium",
+  "why_you": "Fortress is stealth-browser infra so your scraping agents stop getting blocked.",
+  "why_you_source": "template",
+  "act": {
+    "status": "ok",
+    "verdict": "Try it: point scraping agents at stealth Chromium",
+    "tool_url": null,
+    "steps": [
+      "Point the scraping agent at Fortress instead of stock Chromium.",
+      "Re-run a fetch that was getting blocked.",
+      "Keep the browser that gets through for the social-data pipeline."
+    ],
+    "screenshot_path": null
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "2112228154651881479",
+  "url": "https://x.com/trycua/status/2112228154651881479",
+  "kind": "repo",
+  "summary": "1/ Introducing the Cua Spaces SDK. Every big lab now ships a bot with its own computer: Grok Bot, Muse, dots.",
+  "verdict": "README cached · live install skipped (macOS Spaces app)",
+  "why_you": "Cua Spaces is infra for the scraping agents that pull social data for your YC/a16z product recommender.",
+  "why_you_source": "template",
+  "act": {
+    "repo": "https://github.com/trycua/cua",
+    "language": "python",
+    "commands": [],
+    "exit_code": null,
+    "duration_ms": null,
+    "timestamp": "2026-10-20T02:40:00.000Z",
+    "stdout": "Cua Spaces SDK — README cache. Live install skipped (macOS Spaces app).\n\nFrom https://github.com/trycua/cua (README, Cua Spaces):\nGive AI agents computers they can use. Cua Spaces gives agents full desktops on your Mac and on machines you own. This repo also holds Cua Driver, Lume, CUA-S1, and Cua Bench.\n\nSpaces is a desktop app. Each desktop is a Space: a macOS VM on your Mac, or a Linux image, including machines you own and your own cloud account. Install on macOS 26 or later (not run in this demo):\n  curl -fsSL https://cua.ai/install.sh | sh\n\nSDK: the same API in Python (pip install cua), TypeScript (@trycua/cua), Swift, and Kotlin.\nQuickstart: https://cua.ai/docs/spaces/quickstart\n",
+    "stderr": "",
+    "timed_out": false,
+    "smoke_source": "readme",
+    "verdict": "README cached · live install skipped (macOS Spaces app)",
+    "skipped_live_install": "macOS Spaces app; demo replays the README",
+    "readme_url": "https://github.com/trycua/cua#cua-spaces",
+    "status": "cached",
+    "error": null,
+    "screenshot_path": null,
+    "repo_url": "https://github.com/trycua/cua",
+    "attempt_error": null,
+    "fallback_note": "README cached, live install skipped"
+  }
+}
