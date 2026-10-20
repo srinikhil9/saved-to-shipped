@@ -82,6 +82,8 @@ test("scrapling detail leads with the verdict and product table from the cached 
 test("verdict follows the run status instead of always saying Works", () => {
   const timedOut = renderDetail(repoSave({ exit_code: 1, timed_out: true, duration_ms: 90_000 }));
   assert.match(timedOut, /Timed out after 90\.0s/);
+  assert.match(timedOut, /class="verdict timed"/);
+  assert.match(timedOut, /\.verdict\.timed \.line \{ color: var\(--warn\)/);
   assert.doesNotMatch(timedOut, /Works/);
 
   const install = renderDetail(
@@ -94,6 +96,8 @@ test("verdict follows the run status instead of always saying Works", () => {
     }),
   );
   assert.match(install, /Failed at install/);
+  assert.match(install, /class="verdict failed"/);
+  assert.match(install, /\.verdict\.failed \.line \{ color: var\(--bad\)/);
   assert.doesNotMatch(install, /Works/);
   assert.doesNotMatch(install, /Python 3\.10\+/);
   assert.doesNotMatch(install, /Drop this into your ingestion job/);
@@ -112,10 +116,37 @@ test("verdict follows the run status instead of always saying Works", () => {
     }),
   );
   assert.match(other, /Works: installed and ran in 1\.5s \(scrape 0\.4s\)/);
+  assert.match(other, /class="verdict works"/);
+  assert.match(other, /\.verdict\.works \.line \{ color: var\(--good\)/);
   assert.match(other, /Run the snippet above in widget/);
   assert.doesNotMatch(other, /Python 3\.10\+/);
   assert.doesNotMatch(other, /ingestion job/);
   assert.doesNotMatch(other, /Scrapling/);
+});
+
+test("a fallback to the last good run says so in the visible verdict", () => {
+  const when = "2026-10-20T02:12:36.764Z";
+  const html = renderDetail(
+    repoSave({
+      exit_code: 0,
+      timed_out: false,
+      duration_ms: 11342,
+      run_duration_ms: 223,
+      timestamp: when,
+      status: "cached",
+      repo: "https://github.com/acme/widget",
+      snippet: "print('ok')\n",
+      stdout: "ok",
+      attempt_error: "clone timed out",
+      fallback_note: `showing last good run from ${when}`,
+    }),
+  );
+  const detailsAt = html.indexOf("<details");
+  const verdict = html.slice(html.lastIndexOf("<section", html.indexOf('id="verdict"')), detailsAt);
+  assert.match(verdict, new RegExp(`Works \\(last good run, ${escapeRegExp(when)}\\); latest run failed`));
+  assert.match(verdict, /class="verdict works"/);
+  assert.doesNotMatch(verdict, /Works: installed and ran/);
+  assert.match(html.slice(detailsAt), /showing last good run from/);
 });
 
 function repoSave(act) {

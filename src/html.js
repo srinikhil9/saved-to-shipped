@@ -140,8 +140,8 @@ function renderRepoDetail(save, action, details, links, act, products) {
           ${statusPill(save.status)}
         </div>
         <h1>${escapeHtml(save.author || save.url)}</h1>
-        <section class="verdict" id="verdict">
-          <p class="works">${escapeHtml(works)}</p>
+        <section class="verdict ${verdictTone(act)}" id="verdict">
+          <p class="line">${escapeHtml(works)}</p>
           ${save.why_you ? `<p class="why"><span class="k">Why you</span> ${escapeHtml(save.why_you)}</p>` : ""}
           ${snippet ? `<pre class="snippet">${escapeHtml(snippet)}</pre>` : ""}
           <p class="next"><span class="k">Next step</span> ${escapeHtml(next)}</p>
@@ -218,6 +218,10 @@ function formatRunSeconds(ms) {
 function verdictLine(act) {
   const wall = formatRunSeconds(act?.duration_ms);
   const scrape = formatRunSeconds(act?.run_duration_ms);
+  if (lastGoodAfterFailure(act)) {
+    const when = act.timestamp || "the last run";
+    return `Works (last good run, ${when}); latest run failed`;
+  }
   if (act?.timed_out === true) {
     return `Timed out after ${wall || scrape || "the budget"}`;
   }
@@ -227,6 +231,17 @@ function verdictLine(act) {
   }
   const runtime = act?.python ? ` (Python ${act.python})` : "";
   return `Works: ${timingClause(wall, scrape)}${runtime}`;
+}
+
+function verdictTone(act) {
+  if (lastGoodAfterFailure(act)) return "works";
+  if (act?.timed_out === true) return "timed";
+  if (act?.exit_code === 0) return "works";
+  return "failed";
+}
+
+function lastGoodAfterFailure(act) {
+  return Boolean(act?.attempt_error) && act?.exit_code === 0 && act?.timed_out !== true;
 }
 
 function timingClause(wall, scrape) {
@@ -455,13 +470,17 @@ function layout({ title, body }) {
     .detail.lead { padding: 10px 14px 12px; }
     .detail.lead h1 { font-size: 26px; margin: 0 0 6px; }
     .verdict {
-      background: #f3faf6;
-      border: 1px solid #b7d7c4;
       border-radius: 12px;
       padding: 6px 12px 8px;
       margin: 0 0 6px;
     }
-    .verdict .works { margin: 0; font-weight: 700; color: var(--good); }
+    .verdict.works { background: #f3faf6; border: 1px solid #b7d7c4; }
+    .verdict.failed { background: #fde8e4; border: 1px solid #f0b8b0; }
+    .verdict.timed { background: #f8edd8; border: 1px solid #e4c48a; }
+    .verdict .line { margin: 0; font-weight: 700; }
+    .verdict .line.works, .verdict.works .line { color: var(--good); }
+    .verdict .line.failed, .verdict.failed .line { color: var(--bad); }
+    .verdict .line.timed, .verdict.timed .line { color: var(--warn); }
     .verdict .why, .verdict .next { margin: 2px 0 0; }
     .verdict .k { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-right: 6px; }
     .snippet {
