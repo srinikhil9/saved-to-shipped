@@ -4,9 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { createApp } from "../src/app.js";
-import { openDb } from "../src/db.js";
+import { createSave, openDb, updateSave } from "../src/db.js";
 import { listFixturePosts } from "../src/ingest.js";
 import { cardVerdict, renderCards } from "../src/html.js";
+import { runPipeline } from "../src/pipeline.js";
 
 const LINES = {
   cua: "Cua Spaces is infra for the scraping agents that pull social data for your YC/a16z product recommender.",
@@ -182,6 +183,15 @@ test("feed renders every seed offline with kind, verdict, and why_you", async (t
   assert.match(html, /Works: installed and ran in 11\.3s \(scrape 0\.2s\)/);
   assert.match(html, /loop-engineering\.zip/);
   assert.match(html, /second-brain\.zip/);
+  for (const zipPath of [
+    "/artifacts/2069736449902027136/loop-engineering.zip",
+    "/artifacts/2069651792678510894/second-brain.zip",
+  ]) {
+    const zip = await fetch(`${base}${zipPath}`);
+    assert.equal(zip.status, 200, zipPath);
+    const bytes = Buffer.from(await zip.arrayBuffer());
+    assert.equal(bytes.subarray(0, 2).toString(), "PK", zipPath);
+  }
   assert.doesNotMatch(html, /comes next/);
   assert.match(html, /acceleratorcon-2026\.ics/);
   assert.match(html, /href="https:\/\/www\.veeza\.ai"/);
@@ -303,6 +313,61 @@ test("badge and digest stay up with the new cards", async (t) => {
   assert.equal(profile.startup, "desk tools");
 });
 
+const SCRAPLING_URL = "https://x.com/hasantoxr/status/2025902150296236050";
+
+test("a pasted Scrapling card leads while it runs and after it finishes", async (t) => {
+  const posts = listFixturePosts();
+  const db = openDb(":memory:");
+  const app = createApp(db, { offline: true, env: {} });
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const base = `http://127.0.0.1:${server.address().port}`;
+  t.after(() => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))).finally(() => db.close()));
+
+  const ids = [];
+  for (const post of posts) {
+    const created = await fetch(`${base}/api/saves`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ url: post.url }),
+    });
+    assert.equal(created.status, 201);
+    ids.push((await created.json()).id);
+  }
+  const done = [];
+  for (const id of ids) done.push(await waitUntilSettled(base, id));
+  const seeded = done.find((row) => row.url === SCRAPLING_URL);
+  assert.ok(seeded);
+  assert.equal(cardIds(await fetch(`${base}/`).then((response) => response.text()))[0], seeded.id);
+
+  db.prepare("DELETE FROM saves WHERE id = ?").run(seeded.id);
+  const afterDelete = cardIds(await fetch(`${base}/feed/cards`).then((response) => response.text()));
+  assert.equal(afterDelete.length, 7);
+  assert.equal(afterDelete.includes(seeded.id), false);
+
+  const fresh = createSave(db, SCRAPLING_URL);
+  assert.notEqual(fresh.id, seeded.id);
+  updateSave(db, fresh.id, { status: "sorting", created_at: "2020-01-01T00:00:00.000Z" });
+  assert.equal(cardIds(await fetch(`${base}/`).then((response) => response.text()))[0], fresh.id);
+  assert.equal(cardIds(await fetch(`${base}/feed/cards`).then((response) => response.text()))[0], fresh.id);
+
+  const finished = await runPipeline(db, fresh.id, { offline: true, env: {} });
+  assert.equal(finished.status, "done");
+  assert.equal(finished.kind, "repo");
+  const act = JSON.parse(finished.action_result_json).act;
+  assert.equal(act.exit_code, 0);
+  assert.equal(act.duration_ms != null, true);
+  updateSave(db, fresh.id, { created_at: "2020-01-01T00:00:00.000Z" });
+  const html = await fetch(`${base}/`).then((response) => response.text());
+  const idsAfter = cardIds(html);
+  assert.equal(idsAfter[0], fresh.id);
+  assert.equal(idsAfter.length, 8);
+  assert.equal(cardIds(await fetch(`${base}/feed/cards`).then((response) => response.text()))[0], fresh.id);
+  const card = html.slice(html.indexOf(`<article`), html.indexOf("</article>") + "</article>".length);
+  assert.match(card, new RegExp(`/saves/${fresh.id}`));
+  assert.match(card, /Works: installed and ran in 11\.3s \(scrape 0\.2s\)/);
+});
+
 test("cards truncate a long summary and still show kind, verdict, and why_you", () => {
   const summary = `${"niche consumer products from YC startups ".repeat(8)}TAILMARK`;
   const html = renderCards([
@@ -337,6 +402,10 @@ async function waitUntilSettled(base, id) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`save ${id} did not settle`);
+}
+
+function cardIds(html) {
+  return [...html.matchAll(/<h2><a href="\/saves\/(\d+)">/g)].map((match) => Number(match[1]));
 }
 
 function asSave(row) {
