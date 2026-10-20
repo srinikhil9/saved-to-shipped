@@ -7,6 +7,13 @@ import { loadProfile } from "../src/profile.js";
 import { runPipeline } from "../src/pipeline.js";
 import { backfillWhyYou, refreshWhyYou, whyCacheKey, whyYou } from "../src/why.js";
 
+const savedIngestOffline = process.env.INGEST_OFFLINE;
+delete process.env.INGEST_OFFLINE;
+process.on("exit", () => {
+  if (savedIngestOffline === undefined) delete process.env.INGEST_OFFLINE;
+  else process.env.INGEST_OFFLINE = savedIngestOffline;
+});
+
 const profile = loadProfile();
 const LOOP = "A blueprint for running your scrape-and-recommend agents as a self-verifying loop; Saved to Shipped is one.";
 const BRAIN = "Turn your saved posts, founders, and YC/a16z products into a living wiki your recommender can draw on.";

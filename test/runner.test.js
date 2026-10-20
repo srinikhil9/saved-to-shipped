@@ -6,8 +6,8 @@ import test from "node:test";
 import { detectLanguage, readOptionalDeps } from "../src/runner/detect.js";
 import { allowlistedEnv, envForSpawn, SECRET_ENV_NAME } from "../src/runner/env.js";
 import { runCommand } from "../src/runner/exec.js";
-import { extractQuickstart, extractSample, pythonInstallSpec } from "../src/runner/quickstart.js";
-import { normalizeRepoUrl } from "../src/runner/runRepo.js";
+import { consumerProductSmoke, extractQuickstart, extractSample, pythonInstallSpec } from "../src/runner/quickstart.js";
+import { chooseSmoke, normalizeRepoUrl } from "../src/runner/runRepo.js";
 import { renderRunHtml, screenshotRun } from "../src/runner/screenshot.js";
 
 test('child processes do not receive parent secrets', async () => {
@@ -103,6 +103,29 @@ class QuotesSpider:
   assert.equal(quick.source, 'readme');
   assert.match(quick.code, /Fetcher\.get/);
   assert.doesNotMatch(quick.code, /QuotesSpider/);
+});
+
+test("scrapling live smoke scrapes consumer products, not quotes", () => {
+  const readme = `
+\`\`\`python
+from scrapling.fetchers import Fetcher
+
+page = Fetcher.get('https://quotes.toscrape.com/')
+quotes = page.css('.quote .text::text').getall()
+print(quotes)
+\`\`\`
+`;
+  const smoke = chooseSmoke({
+    repoUrl: "https://github.com/D4Vinci/Scrapling",
+    readme,
+    language: "python",
+  });
+  assert.equal(smoke.source, "consumer-products");
+  assert.equal(smoke.code, consumerProductSmoke().code);
+  assert.match(smoke.code, /yc-oss\.github\.io\/api\/tags\/consumer\.json/);
+  assert.match(smoke.code, /from scrapling\.fetchers import Fetcher/);
+  assert.match(smoke.code, /urllib\.request/);
+  assert.doesNotMatch(smoke.code, /quotes\.toscrape/);
 });
 
 test('extracts quote strings from python stdout', () => {

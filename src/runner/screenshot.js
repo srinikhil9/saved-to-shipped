@@ -15,14 +15,22 @@ function escapeHtml(value) {
 }
 
 function renderRunHtml(run) {
+  const products = Array.isArray(run.products) ? run.products.slice(0, 10) : [];
   const quotes = (run.extracted || []).slice(0, 4);
-  const quoteHtml = quotes.length
-    ? quotes
+  const quoteHtml = products.length
+    ? `<table class="products"><thead><tr><th>Product</th><th>One-liner</th><th>URL</th></tr></thead><tbody>${products
         .map(
-          (quote) => `<article class="quote"><span class="mark">“</span><p>${escapeHtml(quote)}</p></article>`,
+          (product) =>
+            `<tr><td>${escapeHtml(product.name)}</td><td>${escapeHtml(product.one_liner)}</td><td>${escapeHtml(product.url)}</td></tr>`,
         )
-        .join('')
-    : `<article class="quote empty"><p>No extracted items in stdout.</p></article>`;
+        .join('')}</tbody></table>`
+    : quotes.length
+      ? quotes
+          .map(
+            (quote) => `<article class="quote"><span class="mark">“</span><p>${escapeHtml(quote)}</p></article>`,
+          )
+          .join('')
+      : `<article class="quote empty"><p>No extracted items in stdout.</p></article>`;
   const status = run.timedOut ? 'timed out' : run.exitCode === 0 ? 'passed' : 'failed';
   const statusClass = run.exitCode === 0 && !run.timedOut ? 'ok' : 'bad';
   const seconds = (Number(run.durationMs || 0) / 1000).toFixed(1);
@@ -62,6 +70,11 @@ function renderRunHtml(run) {
   .pill.ok { color: #86efac; border-color: #14532d; background: #052e16; }
   .pill.bad { color: #fda4af; border-color: #7f1d1d; background: #3f0a12; }
   .quotes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 16px; }
+  table.products { width: 100%; border-collapse: collapse; margin: 16px 0 14px; background: #121826; border: 1px solid #263246; border-radius: 14px; overflow: hidden; }
+  table.products th, table.products td { text-align: left; padding: 8px 12px; font-size: 14px; }
+  table.products th { color: #93a4bd; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+  table.products td { border-top: 1px solid #263246; color: #f8fafc; }
+  table.products td:last-child { color: #93c5fd; font-family: "Noto Sans Mono", ui-monospace, monospace; font-size: 12px; }
   .quote {
     background: linear-gradient(180deg, #161d2b, #121826);
     border: 1px solid #263246;
