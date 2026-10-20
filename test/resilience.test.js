@@ -274,6 +274,61 @@ test("a slow Grok call saves the heuristic first and the live refresh does not c
   assert.equal(again.kind, "tool");
 });
 
+test("live refresh keeps Scrapling as a repo when x.com returns no reply", async (t) => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "saves-noreply-"));
+  const url = "https://x.com/hasantoxr/status/2025902150296236050";
+  let releaseLive = () => {};
+  const liveGate = new Promise((resolve) => {
+    releaseLive = resolve;
+  });
+  let sawStatusPage = false;
+  const db = openDb(":memory:");
+  const app = createApp(db, {
+    env: {},
+    cacheDir,
+    fetchImpl: async (target) => {
+      await liveGate;
+      const href = String(target);
+      if (href === "https://api.fxtwitter.com/status/2025902150296236050") {
+        return {
+          ok: true,
+          json: async () => ({
+            tweet: {
+              id: "2025902150296236050",
+              text: "Scrapling without the reply. pip install scrapling",
+              author: { name: "Hasan Live", screen_name: "hasantoxr" },
+            },
+          }),
+        };
+      }
+      if (href.startsWith("https://x.com/") || href.startsWith("https://twitter.com/")) {
+        sawStatusPage = true;
+        return { ok: true, text: async () => "" };
+      }
+      throw new Error(`unexpected ${href}`);
+    },
+  });
+  const { base, close } = await listen(app);
+  t.after(async () => {
+    releaseLive();
+    await close();
+  });
+
+  const created = await postJson(base, url);
+  const id = (await created.json()).id;
+  const first = await waitUntilSettled(base, id);
+  assert.equal(first.kind, "repo");
+  assert.equal(first.action_result_json.sorted.details.repo_url, "https://github.com/D4Vinci/Scrapling");
+
+  releaseLive();
+  const refreshed = await waitUntil(base, id, (row) => String(row.author || "").includes("Live"));
+  assert.equal(sawStatusPage, true);
+  assert.equal(refreshed.status, "done");
+  assert.equal(refreshed.kind, "repo");
+  assert.equal(refreshed.action_result_json.sorted.details.repo_url, "https://github.com/D4Vinci/Scrapling");
+  assert.equal(refreshed.action_result_json.act.repo_url, "https://github.com/D4Vinci/Scrapling");
+});
+
 test("sanitized env keeps PATH and drops API keys", () => {
   const env = sanitizedEnv({
     PATH: "/usr/bin",

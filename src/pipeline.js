@@ -66,6 +66,7 @@ async function storeSorted(db, id, post, options) {
 
   const input = { text: combinedText(post), links: post.links || [] };
   const heuristic = classifyHeuristic(input);
+  const basis = options.refresh ? preserveSeedRepo(getSave(db, id), heuristic) : heuristic;
   updateSave(db, id, {
     status: "acting",
     author: formatAuthor(post),
@@ -75,14 +76,11 @@ async function storeSorted(db, id, post, options) {
   if (generation !== generationOf(db, id)) return getSave(db, id);
 
   const current = getSave(db, id);
-  const action = await act(
-    { ...current, kind: current.kind || heuristic.kind, details: heuristic.details },
-    { env: options.childEnv || {} },
-  );
+  const action = await act({ ...current, kind: basis.kind, details: basis.details }, { env: options.childEnv || {} });
   if (generation !== generationOf(db, id)) return getSave(db, id);
 
   const latest = getSave(db, id);
-  const plan = planSort(latest, heuristic, generation, options.llm);
+  const plan = planSort(latest, basis, generation, options.llm);
   const saved = updateSave(db, id, {
     status: "done",
     kind: plan.kind,
@@ -91,7 +89,7 @@ async function storeSorted(db, id, post, options) {
       sorted: {
         source: plan.source,
         details: plan.details,
-        links: post.links || [],
+        links: ensureRepoLink(post.links || [], plan.details?.repo_url),
         posted_at: post.posted_at || null,
         handle: post.handle || null,
         reply_text: post.reply_text || "",
@@ -120,8 +118,29 @@ async function storeSorted(db, id, post, options) {
 
 function refreshFromLive(db, id, url, options) {
   return ingest(url, { ...options, skipSaved: true })
-    .then((post) => storeSorted(db, id, post, options))
+    .then((post) => storeSorted(db, id, post, { ...options, refresh: true }))
     .catch(() => {});
+}
+
+function preserveSeedRepo(row, heuristic) {
+  const previousUrl = parseAction(row?.action_result_json)?.sorted?.details?.repo_url || null;
+  const hadRepo = row?.kind === "repo" || Boolean(previousUrl);
+  if (!hadRepo) return heuristic;
+  if (heuristic.kind === "repo" && (heuristic.details.repo_url || !previousUrl)) return heuristic;
+  return {
+    ...heuristic,
+    kind: "repo",
+    details: {
+      ...heuristic.details,
+      repo_url: heuristic.details.repo_url || previousUrl,
+    },
+  };
+}
+
+function ensureRepoLink(links, repoUrl) {
+  if (!repoUrl) return links;
+  if (links.some((link) => link.expanded === repoUrl)) return links;
+  return [...links, { short: null, expanded: repoUrl }];
 }
 
 async function applyUpgrade(db, id, generation, upgraded, options) {
