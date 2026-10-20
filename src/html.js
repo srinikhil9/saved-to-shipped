@@ -522,9 +522,24 @@ function layout({ title, body }) {
 function profileBadge(state) {
   if (state?.source === "bot" && state.synced_at) {
     const iso = escapeHtml(state.synced_at);
-    return `<p class="profile-badge" data-profile="bot">Profile from Grok Bot memory, synced <time data-synced="${iso}" datetime="${iso}"></time></p>`;
+    const utc = escapeHtml(formatSyncedAt(state.synced_at));
+    return `<p class="profile-badge" data-profile="bot">Profile from Grok Bot memory, synced <time data-synced="${iso}" datetime="${iso}">${utc}</time></p>`;
   }
   return `<p class="profile-badge" data-profile="default">Default profile</p>`;
+}
+
+function formatSyncedAt(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return String(iso || "");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = date.getUTCDate();
+  const month = months[date.getUTCMonth()];
+  const year = date.getUTCFullYear();
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  const rawHour = date.getUTCHours();
+  const suffix = rawHour >= 12 ? "PM" : "AM";
+  const hour = rawHour % 12 || 12;
+  return `${month} ${day}, ${year}, ${hour}:${minutes} ${suffix} UTC`;
 }
 
 function badge(kind) {
