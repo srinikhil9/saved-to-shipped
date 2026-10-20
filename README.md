@@ -1,1 +1,50 @@
-# saved-to-shipped
+# Saved to Shipped
+
+Paste a public X post. It shows up in the feed as a card, then gets sorted: repo, paper, idea, tool, event, or other.
+
+This is step 1. Sorting works with no API keys. The act stage (clone a repo, run it, screenshot it) is the next step.
+
+## Run
+
+```bash
+npm install
+npm test
+npm run seed
+npm start
+```
+
+Open http://localhost:3000 and paste one of the seed posts:
+
+- https://x.com/hasantoxr/status/2025902150296236050 — Scrapling, sorted as **repo**
+- https://x.com/0xCodez/status/2069736449902027136 — Loop Engineering, sorted as **paper**
+- https://x.com/cyrilXBT/status/2069651792678510894 — Karpathy's second brain, sorted as **idea**
+
+`npm run seed` loads those three fixtures into `data/saves.sqlite` through the same pipeline. It does not call the network. Pass `--live` to try a live fetch first.
+
+The card is saved as `queued` immediately. The page updates when ingest and sort finish.
+
+## Offline
+
+Live fetch tries, in order:
+
+1. `https://api.fxtwitter.com/status/:id` (full note text, no API key)
+2. `https://cdn.syndication.twimg.com/tweet-result` (public syndication)
+3. `https://publish.twitter.com/oembed` (short text)
+
+`t.co` links are followed to their destination. If the post says the link is in a reply, the author's own reply on that post is read too. Scrapling's GitHub repo is in that first reply: https://github.com/D4Vinci/Scrapling
+
+If the live fetch fails, the matching file in `fixtures/` is used. Known fixtures also fill in links the live payload missed. `INGEST_OFFLINE=1` skips the network and uses fixtures only.
+
+## Sort
+
+With no keys, a regex/heuristic decides the kind: a `github.com/owner/repo` URL is a repo, an arXiv or `.pdf` URL (or an "N-page PDF") is a paper, and so on.
+
+Set `LLM_API_KEY` to use an OpenAI-compatible chat endpoint instead. Optional: `LLM_BASE_URL` (default `https://api.openai.com/v1`) and `LLM_MODEL` (default `gpt-4o-mini`). A failed model call falls back to the heuristic.
+
+## Data
+
+SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `sorting`, `acting`, `done`, `failed`), summary, why_you, action_result_json, screenshot_path, error.
+
+`data/profile.json` is Srinikhil's profile for the later "why you" step. `why_you` stays empty for now.
+
+`src/act.js` is the act stage. Step 1 records a skip. The repo runner (temp dir, install, ~90s timeout, screenshot, cached replay) replaces `actOnRepo` next.

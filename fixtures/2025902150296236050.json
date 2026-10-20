@@ -1,0 +1,29 @@
+{
+  "id": "2025902150296236050",
+  "url": "https://x.com/hasantoxr/status/2025902150296236050",
+  "author": "Hasan Toor",
+  "handle": "hasantoxr",
+  "posted_at": "2026-02-23T11:54:46.000Z",
+  "text": "🚨 OpenClaw just got an unfair advantage over every other AI agent on the internet.\n\nIt's called Scrapling and it scrapes undetectable, adaptive websites without breaking when they update their structure.\n\nNo bot detection. No selector maintenance. No Cloudflare nightmares.\n\nOpenClaw tells Scrapling what to extract.\n\nScrapling handles the stealth. Clean data lands in your agent in seconds.\n\n→ 774x faster than BeautifulSoup with Lxml\n→ Bypasses ALL types of Cloudflare Turnstile automatically\n→ pip install \"scrapling[ai]\" and your AI agent is scraping in 60 seconds\n\nWorks everywhere:\n→ HTTP + browser automation\n→ CSS, XPath, text, regex selectors\n→ Async sessions for parallel scraping\n→ CLI with zero code required\n\nIf you're building AI agents that need real web data, this is the scraping backbone OpenClaw has been missing.\n\n100% Opensource. BSD-3 license.\n\nLink in first comment 👇",
+  "links": [
+    {
+      "short": "https://t.co/4gJjC7IZGP",
+      "expanded": "https://x.com/hasantoxr/status/2025902150296236050/photo/1"
+    }
+  ],
+  "replies": [
+    {
+      "id": "2025902162409316607",
+      "author": "Hasan Toor",
+      "handle": "hasantoxr",
+      "text": "Link: https://t.co/5u1DlQ7D3N",
+      "links": [
+        {
+          "short": "https://t.co/5u1DlQ7D3N",
+          "expanded": "https://github.com/D4Vinci/Scrapling"
+        }
+      ]
+    }
+  ],
+  "source": "Live post text from api.fxtwitter.com on 2026-10-20 (no API key). The GitHub URL is the author self-reply (status 2025902162409316607), expanded from t.co/5u1DlQ7D3N to https://github.com/D4Vinci/Scrapling."
+}
