@@ -1,5 +1,7 @@
 # Release bot.
 # v* tag: prepend CHANGELOG.md, commit it to main, publish the GitHub Release.
+# The [skip release-notes] marker applies only to branch pushes, so tagging the
+# changelog commit still publishes the Release.
 # Push to main, or a manual run: write the job summary and update the draft Release named latest.
 # Token: GITHUB_TOKEN only.
 
@@ -28,7 +30,7 @@ concurrency:
 
 jobs:
   release-notes:
-    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip release-notes]')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') || !contains(github.event.head_commit.message, '[skip release-notes]')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,4 +42,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NOTES_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-        run: node scripts/release-notes.mjs
+        run: node .github/release/release-notes.mjs

@@ -20,7 +20,7 @@ Sample notes covering pull requests #1, #2, #3, and #4. They were open when thes
 - **builder 2** built #2 Run repo saves and cache the Scrapling scrape.
 - **builder 3** built #3 Add a one-line profile-based why_you for each save and #4 Step 4: paper/idea actions.
 - **tracker** reviewed #1: needs fixes; re-review: passes, with 1 follow-up fix; re-review: passes.
-- **tracker** reviewed #2: needs fixes.
+- **tracker** reviewed #2: needs fixes; re-review: still needs fixes (3).
 - **tracker** reviewed #3: needs fixes (small ones); re-review: still needs fixes (2).
 - **tracker** reviewed #4: passes; re-review: still needs fixes (2).
 

@@ -2,9 +2,10 @@
 /**
  * Release bot. Collects pull requests and writes plain-English notes.
  *
- *   npm run release-notes -- --dry-run
- *   npm run release-notes -- --dry-run --example
- *   node scripts/release-notes.mjs --self-check
+ *   node .github/release/release-notes.mjs --dry-run
+ *   node .github/release/release-notes.mjs --dry-run --example
+ *   node .github/release/release-notes.mjs --self-check
+ *   npm run release-notes --prefix .github/release -- --dry-run
  *
  * On a v* tag in GitHub Actions: prepend CHANGELOG.md, commit it to main,
  * and publish the Release for that tag.
@@ -18,7 +19,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const changelogPath = join(root, "CHANGELOG.md");
 const teamPath = join(root, ".github", "bot-team.json");
 
@@ -331,6 +332,19 @@ function upsertSection(fileText, section) {
   return `${before}\n\n${block}\n${after ? `\n${after}\n` : ""}`;
 }
 
+function releaseHeadSha() {
+  const onTag = currentTagName();
+  const onMain = process.env.GITHUB_REF === "refs/heads/main";
+  if (process.env.GITHUB_SHA && (onTag || onMain || process.env.GITHUB_ACTIONS === "true")) {
+    return process.env.GITHUB_SHA;
+  }
+  try {
+    return execFileSync("git", ["rev-parse", "origin/main"], { cwd: root, encoding: "utf8" }).trim();
+  } catch {
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  }
+}
+
 function currentTagName() {
   const ref = process.env.GITHUB_REF || "";
   if (ref.startsWith("refs/tags/v")) return ref.slice("refs/tags/".length);
@@ -358,26 +372,41 @@ async function versionTags(repo) {
   return dated;
 }
 
+function landedOnMain(pull, mainShas) {
+  if (pull.base?.ref === "main") return true;
+  return Boolean(pull.merge_commit_sha && mainShas && mainShas.has(pull.merge_commit_sha));
+}
+
+function byNumber(pulls) {
+  return pulls.sort((a, b) => a.number - b.number);
+}
+
+async function historyShas(repo, sha) {
+  const commits = await ghList(`/repos/${repo}/commits?sha=${sha}`);
+  return new Set(commits.map((commit) => commit.sha));
+}
+
 async function mergedPulls(repo, range) {
   const closed = await ghList(`/repos/${repo}/pulls?state=closed&sort=updated&direction=desc`);
   const merged = closed.filter((pull) => pull.merged_at);
   if (!range.base) {
-    return merged
-      .filter((pull) => !range.headDate || pull.merged_at <= range.headDate)
-      .sort((a, b) => a.number - b.number);
+    const shas = await historyShas(repo, range.headSha);
+    return byNumber(merged.filter((pull) => {
+      if (!landedOnMain(pull, shas)) return false;
+      return !range.headDate || pull.merged_at <= range.headDate;
+    }));
   }
   const compared = await gh(`/repos/${repo}/compare/${range.base.sha}...${range.headSha}`);
   const commits = compared.data.commits || [];
+  const shas = new Set(commits.map((commit) => commit.sha));
   if (compared.data.total_commits > commits.length) {
     console.error(`Compare listed ${commits.length} of ${compared.data.total_commits} commits. Using merge dates.`);
-    return merged
-      .filter((pull) => pull.merged_at > range.base.date && pull.merged_at <= addMinutes(range.headDate, 5))
-      .sort((a, b) => a.number - b.number);
+    return byNumber(merged.filter((pull) => {
+      if (!landedOnMain(pull, shas)) return false;
+      return pull.merged_at > range.base.date && pull.merged_at <= addMinutes(range.headDate, 5);
+    }));
   }
-  const shas = new Set(commits.map((commit) => commit.sha));
-  return merged
-    .filter((pull) => shas.has(pull.merge_commit_sha))
-    .sort((a, b) => a.number - b.number);
+  return byNumber(merged.filter((pull) => shas.has(pull.merge_commit_sha) && landedOnMain(pull, shas)));
 }
 
 function addMinutes(iso, minutes) {
@@ -410,7 +439,7 @@ async function decorate(repo, pulls, team) {
 }
 
 function exampleNumbers(team) {
-  return Object.keys(team.prs || {})
+  return (team.examplePrs || [])
     .map((number) => Number(number))
     .filter((number) => Number.isInteger(number))
     .sort((a, b) => a - b);
@@ -418,7 +447,7 @@ function exampleNumbers(team) {
 
 async function collectExample(repo, team) {
   const numbers = exampleNumbers(team);
-  if (!numbers.length) throw new Error("No pull request numbers in .github/bot-team.json.");
+  if (!numbers.length) throw new Error("No examplePrs in .github/bot-team.json.");
   const pulls = [];
   for (const number of numbers) {
     const result = await gh(`/repos/${repo}/pulls/${number}`);
@@ -439,8 +468,7 @@ async function collectRelease(repo) {
   const team = loadTeam();
   const tags = await versionTags(repo);
   const tagName = currentTagName();
-  const headSha = process.env.GITHUB_SHA
-    || execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const headSha = releaseHeadSha();
   const head = await gh(`/repos/${repo}/commits/${headSha}`);
   const headDate = head.data.commit.committer.date;
   const base = previousTag(tags, tagName, headDate);
@@ -619,7 +647,25 @@ function selfCheck() {
   assert(!replaced.includes("\nSample.\n"), "old intro removed");
   const prepended = upsertSection(replaced, "## v0.1.0\n\nPull requests merged since the start of the repository.\n");
   assert(prepended.indexOf("## v0.1.0") < prepended.indexOf("## Example: PRs #1-#4"), "tag section prepends");
-  assert(exampleNumbers(team).join(",") === "1,2,3,4", "mapping covers PRs #1-#4");
+  const separated = {
+    examplePrs: [1, 2],
+    prs: { 1: "builder", 2: "builder 2", 5: "builder 3" },
+    branchPrefixes: [{ prefix: "cursor/release-bot", bot: "builder 3" }],
+  };
+  assert(exampleNumbers(separated).join(",") === "1,2", "example list is separate from the mapping");
+  assert(!exampleNumbers(separated).includes(5), "example list ignores extra mapped pull requests");
+  assert(
+    assignBot({ number: 5, labels: [], body: "", head: { ref: "anywhere" } }, separated) === "builder 3",
+    "mapped pull request number",
+  );
+  assert(
+    assignBot({ number: 9, labels: [], body: "", head: { ref: "cursor/release-bot-c424" } }, separated) === "builder 3",
+    "release-bot prefix",
+  );
+  assert(landedOnMain({ base: { ref: "cursor/paste-url" }, merge_commit_sha: "side" }, new Set(["on-main"])) === false, "stacked pull request");
+  assert(landedOnMain({ base: { ref: "main" }, merge_commit_sha: "m" }, new Set()) === true, "base main");
+  assert(landedOnMain({ base: { ref: "feature" }, merge_commit_sha: "landed" }, new Set(["landed"])) === true, "merge commit on main");
+  assert(assignBot({ number: 5, labels: [], body: "", head: { ref: "cursor/release-bot-c424" } }, team) === "builder 3", "live map credits #5");
   const tags = [
     { name: "v0.2.0", date: "2026-02-01T00:00:00Z" },
     { name: "v0.1.0", date: "2026-01-01T00:00:00Z" },
