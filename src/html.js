@@ -82,11 +82,26 @@ export function renderCards(saves) {
   return feedOrder(saves).map(renderCard).join("");
 }
 
-/** Repos with a finished install-and-run lead the feed. Everything else keeps its order. */
+const SCRAPLING_STATUS = "2025902150296236050";
+
+/** Finished install-and-run repos lead. A Scrapling paste leads while it is still running too. */
 function feedOrder(saves) {
-  const ranked = saves.map((save, index) => ({ save, index, lead: ranForReal(save) ? 0 : 1 }));
+  const ranked = saves.map((save, index) => ({ save, index, lead: leadsFeed(save) ? 0 : 1 }));
   ranked.sort((a, b) => a.lead - b.lead || a.index - b.index);
   return ranked.map((item) => item.save);
+}
+
+function leadsFeed(save) {
+  if (ranForReal(save)) return true;
+  return isRunning(save) && isScraplingPost(save);
+}
+
+function isRunning(save) {
+  return save?.status === "queued" || save?.status === "sorting" || save?.status === "acting";
+}
+
+function isScraplingPost(save) {
+  return String(save?.url || "").includes(`/status/${SCRAPLING_STATUS}`);
 }
 
 function ranForReal(save) {
@@ -302,6 +317,7 @@ function renderCard(save) {
       ${renderZipLink(action?.act)}
       ${actionLinks(save, action)}
       ${cardNotes(action?.act)}
+      ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
     </article>
   `;
 }

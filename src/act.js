@@ -314,14 +314,31 @@ function icsEscape(value) {
 }
 
 function foldLine(line) {
-  if (line.length <= 75) return line;
-  let out = line.slice(0, 75);
-  let rest = line.slice(75);
-  while (rest.length) {
-    out += `\r\n ${rest.slice(0, 74)}`;
-    rest = rest.slice(74);
+  const text = String(line);
+  if (Buffer.byteLength(text) <= 75) return text;
+  const parts = [];
+  let rest = text;
+  let budget = 75;
+  while (rest) {
+    const head = takeCodePoints(rest, budget);
+    parts.push(head);
+    rest = rest.slice(head.length);
+    budget = 74;
   }
-  return out;
+  return parts.join("\r\n ");
+}
+
+function takeCodePoints(text, maxOctets) {
+  let octets = 0;
+  let end = 0;
+  for (const char of text) {
+    const size = Buffer.byteLength(char);
+    if (end > 0 && octets + size > maxOctets) break;
+    octets += size;
+    end += char.length;
+    if (octets >= maxOctets) break;
+  }
+  return text.slice(0, end);
 }
 
 function externalUrl(text) {

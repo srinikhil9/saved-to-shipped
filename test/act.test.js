@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import AdmZip from "adm-zip";
 import express from "express";
 import { once } from "node:events";
-import { act } from "../src/act.js";
+import { act, buildIcs } from "../src/act.js";
 import { mountArtifacts } from "../src/act/serve.js";
 import { XAI_CHAT_COMPLETIONS } from "../src/act/llm.js";
 import { sampleSave } from "../src/act/sample.js";
@@ -358,6 +358,33 @@ test("act:demo reads the committed seeds when runtime holds a grok spec", async 
   } finally {
     fs.rmSync(runtimeDir, { recursive: true, force: true });
   }
+});
+
+test("ics folding stays on utf-8 octet boundaries and keeps whole code points", () => {
+  const description = `${"a".repeat(62)}🎟️tail${"é".repeat(40)}`;
+  const ics = buildIcs({
+    title: "Meet",
+    date: "2026-10-23",
+    location: null,
+    url: null,
+    description,
+  });
+  const physical = ics.split("\r\n").filter((line) => line && line !== " ");
+  for (const line of physical) {
+    assert.ok(Buffer.byteLength(line) <= 75, line);
+    assert.equal([...line].join(""), line);
+    assert.doesNotMatch(line, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    assert.doesNotMatch(line, /(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  }
+  const unfolded = physical
+    .map((line, index) => (index > 0 && line.startsWith(" ") ? line.slice(1) : line))
+    .join("");
+  assert.match(unfolded, /DESCRIPTION:a{62}🎟️tailé{40}/);
+  assert.doesNotMatch(ics, /a🎟️/);
+  const descriptionLine = ics.split("\r\n").find((line) => line.startsWith("DESCRIPTION:"));
+  assert.ok(descriptionLine);
+  assert.equal(descriptionLine.endsWith("a"), true);
+  assert.equal(descriptionLine.includes("🎟️"), false);
 });
 
 test("offline repo replays its cache and the zip link only accepts artifact paths", async () => {
