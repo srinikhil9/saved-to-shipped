@@ -45,7 +45,38 @@ export function openDb(dbPath = ":memory:") {
   const have = new Set(db.prepare("PRAGMA table_info(saves)").all().map((column) => column.name));
   if (!have.has("why_you_source")) db.exec("ALTER TABLE saves ADD COLUMN why_you_source TEXT");
   if (!have.has("why_you_profile_hash")) db.exec("ALTER TABLE saves ADD COLUMN why_you_profile_hash TEXT");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bot_profile (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      payload_json TEXT NOT NULL,
+      synced_at TEXT NOT NULL
+    );
+  `);
   return db;
+}
+
+export function saveBotProfile(db, payload, syncedAt) {
+  db.prepare(
+    `INSERT INTO bot_profile (id, payload_json, synced_at)
+     VALUES (1, @payload_json, @synced_at)
+     ON CONFLICT(id) DO UPDATE SET
+       payload_json = excluded.payload_json,
+       synced_at = excluded.synced_at`,
+  ).run({ payload_json: JSON.stringify(payload), synced_at: syncedAt });
+}
+
+export function deleteBotProfile(db) {
+  db.prepare("DELETE FROM bot_profile WHERE id = 1").run();
+}
+
+export function readBotProfile(db) {
+  const row = db.prepare("SELECT payload_json, synced_at FROM bot_profile WHERE id = 1").get();
+  if (!row) return null;
+  try {
+    return { payload: JSON.parse(row.payload_json), synced_at: row.synced_at };
+  } catch {
+    return null;
+  }
 }
 
 export function createSave(db, url) {

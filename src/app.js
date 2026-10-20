@@ -1,18 +1,19 @@
 import express from "express";
 import { mountArtifacts } from "./act/serve.js";
-import { createSave, findSaveByUrl, getSave, listSaves, publicSave, updateSave } from "./db.js";
+import { buildDigest, parseSince } from "./digest.js";
+import { createSave, deleteBotProfile, findSaveByUrl, getSave, listSaves, publicSave, saveBotProfile, updateSave } from "./db.js";
 import { llmSettings, sanitizedEnv } from "./env.js";
 import { renderCards, renderDetail, renderFeed, renderNotFound } from "./html.js";
 import { paths } from "./paths.js";
-import { loadProfile } from "./profile.js";
+import { presentProfile, resolveProfile, validateProfile } from "./profile.js";
 import { runPipeline } from "./pipeline.js";
-import { backfillWhyYou } from "./why.js";
+import { backfillWhyYou, retargetWhyYou } from "./why.js";
 import { parseXStatusUrl } from "./xurl.js";
 
 export function createApp(db, options = {}) {
   const source = options.env ?? process.env;
-  const profile = options.profile || loadProfile();
-  backfillWhyYou(db, profile);
+  const profileOf = () => viewProfile(db, options).profile;
+  backfillWhyYou(db, profileOf());
   const pipelineOptions = {
     offline: options.offline === true,
     fetchImpl: options.fetchImpl,
@@ -27,7 +28,6 @@ export function createApp(db, options = {}) {
     whyTimeoutMs: options.whyTimeoutMs,
     awaitSpec: options.awaitSpec === true,
     specTimeoutMs: options.specTimeoutMs,
-    profile,
     runRepo: options.runRepo,
     demoBudgetMs: options.demoBudgetMs,
     screenshotDir: options.screenshotDir,
@@ -40,7 +40,7 @@ export function createApp(db, options = {}) {
   mountArtifacts(app);
 
   app.get("/", (_req, res) => {
-    res.type("html").send(renderFeed(listSaves(db)));
+    res.type("html").send(renderFeed(listSaves(db), viewProfile(db, options)));
   });
 
   app.get("/feed/cards", (_req, res) => {
@@ -64,13 +64,43 @@ export function createApp(db, options = {}) {
       return res.status(200).json(publicSave(existing));
     }
     const row = createSave(db, parsed.url);
-    startPipeline(db, row.id, pipelineOptions);
+    startPipeline(db, row.id, pipelineOptions, profileOf);
     if (wantsHtml(req)) return res.redirect(303, "/");
     res.status(201).json(publicSave(row));
   });
 
   app.get("/api/saves", (_req, res) => {
     res.json(listSaves(db).map(publicSave));
+  });
+
+  app.get("/api/digest", (req, res) => {
+    const since = parseSince(req.query.since);
+    if (!since) return res.status(400).json({ error: "since must be an ISO timestamp" });
+    res.json(buildDigest(listSaves(db), profileOf(), { since, baseUrl: publicBase(req, source) }));
+  });
+
+  app.get("/api/profile", (_req, res) => {
+    res.json(presentProfile(viewProfile(db, options)));
+  });
+
+  app.put("/api/profile", (req, res) => {
+    if (!isJsonRequest(req)) {
+      return res.status(400).json({ error: "Content-Type must be application/json" });
+    }
+    const parsed = validateProfile(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const syncedAt = new Date().toISOString();
+    saveBotProfile(db, parsed.profile, syncedAt);
+    const state = resolveProfile(db);
+    retargetWhyYou(db, state.profile);
+    res.json(presentProfile(state));
+  });
+
+  app.delete("/api/profile", (_req, res) => {
+    deleteBotProfile(db);
+    const state = resolveProfile(db);
+    retargetWhyYou(db, state.profile);
+    res.json(presentProfile(viewProfile(db, options)));
   });
 
   app.get("/api/saves/:id", (req, res) => {
@@ -85,20 +115,47 @@ export function createApp(db, options = {}) {
       return wantsHtml(req) ? res.redirect(303, "/") : res.status(404).json({ error: "Save not found" });
     }
     const row = updateSave(db, save.id, { status: "queued", error: null });
-    startPipeline(db, row.id, { ...pipelineOptions, force: readForce(req) });
+    startPipeline(db, row.id, { ...pipelineOptions, force: readForce(req) }, profileOf);
     if (wantsHtml(req)) return res.redirect(303, `/saves/${row.id}`);
     res.json(publicSave(row));
+  });
+
+  app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (err?.type === "entity.parse.failed" || (err instanceof SyntaxError && err.status === 400)) {
+      return res.status(400).json({ error: "Request body must be JSON" });
+    }
+    return next(err);
   });
 
   return app;
 }
 
-function startPipeline(db, id, options) {
+function viewProfile(db, options) {
+  if (options.profile) return { profile: options.profile, source: "default", synced_at: null };
+  return resolveProfile(db);
+}
+
+function startPipeline(db, id, options, profileOf) {
   setImmediate(() => {
-    runPipeline(db, id, options).catch((error) => {
+    runPipeline(db, id, { ...options, profile: profileOf() }).catch((error) => {
       console.error("pipeline failed", error);
     });
   });
+}
+
+function isJsonRequest(req) {
+  return (req.get("content-type") || "").includes("application/json");
+}
+
+function publicBase(req, source) {
+  const configured = typeof source?.BASE_URL === "string" ? source.BASE_URL.trim() : "";
+  if (configured) return configured.replace(/\/$/, "");
+  const host = req.get("host");
+  if (!host) return "";
+  const forwarded = req.get("x-forwarded-proto");
+  const proto = forwarded ? forwarded.split(",")[0].trim() : req.protocol || "http";
+  return `${proto}://${host}`;
 }
 
 function loadRow(db, id) {

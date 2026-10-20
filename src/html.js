@@ -3,7 +3,7 @@ import { extractProducts } from "./runner/quickstart.js";
 
 const KINDS = ["repo", "tool", "paper", "idea", "event", "other"];
 
-export function renderFeed(saves) {
+export function renderFeed(saves, profileState = {}) {
   const pending = saves.some((save) => needsRefresh(save));
   return layout({
     title: "Saved to Shipped",
@@ -13,6 +13,7 @@ export function renderFeed(saves) {
           <p class="brand">Saved to Shipped</p>
           <h1>Save it. Ship it.</h1>
           <p class="lede">Paste a public X post. It lands in the feed, then gets sorted into a repo, paper, idea, tool, or event. A paper or an idea comes back as a spec and a starter zip.</p>
+          ${profileBadge(profileState)}
         </div>
       </header>
       <form class="paste" method="post" action="/api/saves">
@@ -375,6 +376,16 @@ function layout({ title, body }) {
     .wrap { max-width: 1080px; margin: 0 auto; padding: 16px 20px 48px; }
     .back { margin: 0 0 8px; }
     .brand { margin: 0; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; color: var(--accent); font-weight: 700; }
+    .profile-badge {
+      display: inline-block;
+      margin: 10px 0 0;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: #eeeae3;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
     h1 { font-family: Palatino, "Iowan Old Style", Georgia, serif; font-size: 42px; line-height: 1.05; margin: 6px 0 8px; }
     .lede, .summary { color: var(--muted); }
     .why { margin: 8px 0 0; }
@@ -495,6 +506,27 @@ function layout({ title, body }) {
   </main>
 </body>
 </html>`;
+}
+
+function profileBadge(state) {
+  if (state?.source === "bot" && state.synced_at) {
+    return `<p class="profile-badge" data-profile="bot">Profile from Grok Bot memory, synced ${escapeHtml(formatSyncedAt(state.synced_at))}</p>`;
+  }
+  return `<p class="profile-badge" data-profile="default">Default profile</p>`;
+}
+
+function formatSyncedAt(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return String(iso || "");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = date.getUTCDate();
+  const month = months[date.getUTCMonth()];
+  const year = date.getUTCFullYear();
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  const rawHour = date.getUTCHours();
+  const suffix = rawHour >= 12 ? "PM" : "AM";
+  const hour = rawHour % 12 || 12;
+  return `${month} ${day}, ${year}, ${hour}:${minutes} ${suffix} UTC`;
 }
 
 function badge(kind) {
