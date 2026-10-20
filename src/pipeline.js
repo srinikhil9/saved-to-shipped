@@ -2,10 +2,12 @@ import { act } from "./act.js";
 import { classify } from "./classify.js";
 import { getSave, updateSave } from "./db.js";
 import { combinedText, ingest } from "./ingest.js";
+import { loadProfile } from "./profile.js";
+import { whyYou } from "./why.js";
 
 /**
- * Stages for one save: ingest → sort → act.
- * Relate (why_you, from data/profile.json) is a later step and stays null.
+ * Stages for one save: ingest → sort → why_you → act.
+ * why_you is one profile line (template per kind, plus a few keyword hits).
  * Show reads whatever this pipeline stored.
  */
 export async function runPipeline(db, id, options = {}) {
@@ -23,10 +25,15 @@ export async function runPipeline(db, id, options = {}) {
       { text: combinedText(post), links: post.links || [] },
       { env: options.env, fetchImpl: options.llmFetch },
     );
+    const profile = options.profile || loadProfile();
     updateSave(db, id, {
       status: "acting",
       kind: sorted.kind,
       summary: sorted.summary,
+      why_you: whyYou(
+        { kind: sorted.kind, summary: sorted.summary, text: post.text || "" },
+        profile,
+      ),
     });
 
     const current = getSave(db, id);

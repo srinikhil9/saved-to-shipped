@@ -4,11 +4,13 @@ import { renderCards, renderDetail, renderFeed, renderNotFound } from "./html.js
 import { paths } from "./paths.js";
 import { loadProfile } from "./profile.js";
 import { runPipeline } from "./pipeline.js";
+import { backfillWhyYou } from "./why.js";
 import { parseXStatusUrl } from "./xurl.js";
 
 export function createApp(db, options = {}) {
-  loadProfile();
-  const pipelineOptions = { env: process.env, ...options };
+  const profile = options.profile || loadProfile();
+  backfillWhyYou(db, profile);
+  const pipelineOptions = { env: process.env, profile, ...options };
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "32kb" }));
@@ -59,6 +61,7 @@ export function createApp(db, options = {}) {
       status: "queued",
       kind: null,
       summary: null,
+      why_you: null,
       error: null,
       action_result_json: null,
       screenshot_path: null,

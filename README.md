@@ -45,7 +45,7 @@ Set `LLM_API_KEY` to use an OpenAI-compatible chat endpoint instead. Optional: `
 
 SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `sorting`, `acting`, `done`, `failed`), summary, why_you, action_result_json, screenshot_path, error.
 
-`data/profile.json` is Srinikhil's profile for the later "why you" step. `why_you` stays empty for now.
+`data/profile.json` is Srinikhil's profile. After a save is sorted, the pipeline writes one `why_you` line from a template for that kind (repo, tool, paper, idea, event, other). A few keyword hits specialize it: a scraping repo, the Loop Engineering paper, and the second-brain idea. Rows that already have a kind and an empty `why_you` are filled when the app starts, on seed, or on rerun. The line shows on the feed card and the detail page.
 
 `src/act.js` runs repos. Paper, idea, tool, and event actions are still stubs.
 
