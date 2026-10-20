@@ -25,6 +25,9 @@ export function createApp(db, options = {}) {
     whyFetch: options.whyFetch,
     whyTimeoutMs: options.whyTimeoutMs,
     profile,
+    runRepo: options.runRepo,
+    demoBudgetMs: options.demoBudgetMs,
+    screenshotDir: options.screenshotDir,
   };
   const app = express();
   app.disable("x-powered-by");

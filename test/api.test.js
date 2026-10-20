@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/db.js";
@@ -12,7 +15,8 @@ const SEEDS = [
 
 test("API and HTML feed sort pasted seed URLs", async (t) => {
   const db = openDb(":memory:");
-  const app = createApp(db, { offline: true, env: {} });
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "saves-api-"));
+  const app = createApp(db, { offline: true, env: {}, cacheDir });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;

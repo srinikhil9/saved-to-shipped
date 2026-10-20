@@ -189,6 +189,7 @@ test("a slow Grok call saves the heuristic first and the live refresh does not c
   const app = createApp(db, {
     env: { XAI_API_KEY: "test-key" },
     cacheDir,
+    runRepo: instantRepoRun(),
     fetchImpl: async (url) => {
       await liveGate;
       return liveScrapling(url);
@@ -295,6 +296,7 @@ test("live refresh keeps Scrapling as a repo when x.com returns no reply", async
   const app = createApp(db, {
     env: {},
     cacheDir,
+    runRepo: instantRepoRun(),
     fetchImpl: async (target) => {
       await liveGate;
       const href = String(target);
@@ -330,7 +332,11 @@ test("live refresh keeps Scrapling as a repo when x.com returns no reply", async
   assert.equal(first.action_result_json.sorted.details.repo_url, "https://github.com/D4Vinci/Scrapling");
 
   releaseLive();
-  const refreshed = await waitUntil(base, id, (row) => String(row.author || "").includes("Live"));
+  const refreshed = await waitUntil(
+    base,
+    id,
+    (row) => String(row.author || "").includes("Live") && row.status === "done",
+  );
   assert.equal(sawStatusPage, true);
   assert.equal(refreshed.status, "done");
   assert.equal(refreshed.kind, "repo");
@@ -353,6 +359,20 @@ test("sanitized env keeps PATH and drops API keys", () => {
   assert.equal(JSON.stringify(env).includes("secret"), false);
   assert.equal(env.XAI_API_KEY, undefined);
 });
+
+function instantRepoRun() {
+  return async () => ({
+    error: null,
+    warning: null,
+    stdout: "ran",
+    screenshot_path: "/screenshots/scrapling-seed.png",
+    action_result_json: {
+      stdout: "ran",
+      timestamp: "2026-10-20T02:20:00.000Z",
+      repo: "https://github.com/D4Vinci/Scrapling",
+    },
+  });
+}
 
 function armGrok(capture) {
   return new Promise((resolve) => {
