@@ -1,4 +1,5 @@
 import { renderFileList, renderZipLink } from "./act/snippet.js";
+import { extractProducts } from "./runner/quickstart.js";
 
 const KINDS = ["repo", "tool", "paper", "idea", "event", "other"];
 
@@ -80,6 +81,13 @@ export function renderDetail(save) {
   const details = action?.sorted?.details || {};
   const links = action?.sorted?.links || [];
   const act = action?.act;
+  const products = productsFromRun(act);
+  if (save.kind === "repo" && act && (products.length || act.snippet || act.duration_ms != null)) {
+    return layout({
+      title: save.author ? `${save.author} · Saved to Shipped` : "Save · Saved to Shipped",
+      body: renderRepoDetail(save, action, details, links, act, products),
+    });
+  }
   return layout({
     title: save.author ? `${save.author} · Saved to Shipped` : "Save · Saved to Shipped",
     body: `
@@ -118,6 +126,92 @@ export function renderDetail(save) {
       ${needsRefresh(save) ? `<script>setTimeout(function () { location.reload(); }, 800);</script>` : ""}
     `,
   });
+}
+
+function renderRepoDetail(save, action, details, links, act, products) {
+  const seconds = formatRunSeconds(act.duration_ms);
+  const works = seconds ? `Works: installed and ran in ${seconds} (Python 3.10+)` : "Works: installed and ran (Python 3.10+)";
+  const snippet = String(act.snippet || "").replace(/\s+$/, "");
+  return `
+      <p class="back"><a href="/">← Feed</a></p>
+      <article class="detail lead">
+        <div class="meta">
+          ${save.kind ? badge(save.kind) : ""}
+          ${statusPill(save.status)}
+        </div>
+        <h1>${escapeHtml(save.author || save.url)}</h1>
+        <section class="verdict" id="verdict">
+          <p class="works">${escapeHtml(works)}</p>
+          ${save.why_you ? `<p class="why"><span class="k">Why you</span> ${escapeHtml(save.why_you)}</p>` : ""}
+          ${snippet ? `<pre class="snippet">${escapeHtml(snippet)}</pre>` : ""}
+          <p class="next"><span class="k">Next step</span> Drop this into your ingestion job</p>
+        </section>
+        <p class="run-label">Show last run</p>
+        ${renderProductTable(products)}
+        <details class="more">
+          <summary>Details</summary>
+          ${save.summary ? `<p class="summary">${escapeHtml(save.summary)}</p>` : ""}
+          <p class="source"><a href="${escapeHtml(save.url)}">${escapeHtml(save.url)}</a></p>
+          ${save.text ? `<pre class="post">${escapeHtml(save.text)}</pre>` : ""}
+          ${action?.sorted?.reply_text ? `<h2>Also in the thread</h2><pre class="post">${escapeHtml(action.sorted.reply_text)}</pre>` : ""}
+          <h2>Sorted</h2>
+          <dl class="details">
+            ${detailRow("Kind", save.kind)}
+            ${detailRow("Repo", details.repo_url)}
+            ${detailRow("Paper", details.paper_url)}
+            ${detailRow("Tool", details.tool_url)}
+            ${detailRow("Date", details.date)}
+            ${detailRow("Sorted by", action?.sorted?.source)}
+          </dl>
+          ${renderLinks(links)}
+          <div class="last-run">
+            ${renderLastRun(save, act)}
+          </div>
+        </details>
+        ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
+        ${save.why_you_source === "pending" ? `<script>setTimeout(() => location.reload(), 800)</script>` : ""}
+        <form method="post" action="/api/saves/${save.id}/rerun">
+          <button type="submit">Run again</button>
+        </form>
+      </article>
+    `;
+}
+
+function renderProductTable(products) {
+  if (!products.length) return `<p class="empty">No products in this run.</p>`;
+  return `
+    <table class="products">
+      <thead>
+        <tr><th>Product</th><th>One-liner</th><th>URL</th></tr>
+      </thead>
+      <tbody>
+        ${products
+          .map((product) => {
+            const href = safeHref(product.url);
+            const urlCell = href
+              ? `<a href="${escapeHtml(href)}">${escapeHtml(href)}</a>`
+              : escapeHtml(product.url);
+            return `<tr><td class="name">${escapeHtml(product.name)}</td><td>${escapeHtml(product.one_liner)}</td><td class="url">${urlCell}</td></tr>`;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function productsFromRun(act) {
+  const parsed = extractProducts(act?.stdout);
+  if (parsed.length) return parsed;
+  if (!Array.isArray(act?.products)) return [];
+  return act.products
+    .filter((product) => product && product.name && product.one_liner && product.url)
+    .slice(0, 10);
+}
+
+function formatRunSeconds(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return `${(n / 1000).toFixed(1)}s`;
 }
 
 function renderCard(save) {
@@ -238,7 +332,8 @@ function layout({ title, body }) {
       font: 17px/1.5 "Avenir Next", "Segoe UI", sans-serif;
     }
     a { color: var(--accent); }
-    .wrap { max-width: 820px; margin: 0 auto; padding: 32px 20px 64px; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 16px 20px 48px; }
+    .back { margin: 0 0 8px; }
     .brand { margin: 0; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; color: var(--accent); font-weight: 700; }
     h1 { font-family: Palatino, "Iowan Old Style", Georgia, serif; font-size: 42px; line-height: 1.05; margin: 6px 0 8px; }
     .lede, .summary { color: var(--muted); }
@@ -317,6 +412,36 @@ function layout({ title, body }) {
     .shot { max-width: 100%; border-radius: 12px; margin-top: 10px; display: block; }
     .sample { margin: 8px 0 4px; padding-left: 18px; }
     .last-run h3 { margin: 14px 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+    .detail.lead { padding: 10px 14px 12px; }
+    .detail.lead h1 { font-size: 26px; margin: 0 0 6px; }
+    .verdict {
+      background: #f3faf6;
+      border: 1px solid #b7d7c4;
+      border-radius: 12px;
+      padding: 6px 12px 8px;
+      margin: 0 0 6px;
+    }
+    .verdict .works { margin: 0; font-weight: 700; color: var(--good); }
+    .verdict .why, .verdict .next { margin: 2px 0 0; }
+    .verdict .k { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-right: 6px; }
+    .snippet {
+      margin: 4px 0 0;
+      padding: 6px 8px;
+      font-size: 12px;
+      line-height: 1.25;
+      white-space: pre;
+      overflow: auto;
+    }
+    .run-label { margin: 0 0 2px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+    table.products { width: 100%; border-collapse: collapse; }
+    table.products th, table.products td { text-align: left; padding: 2px 10px 2px 0; vertical-align: baseline; }
+    table.products th { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+    table.products td { border-top: 1px solid var(--line); font-size: 14px; line-height: 1.2; }
+    table.products td.name { font-weight: 700; white-space: nowrap; }
+    table.products td.url { font-size: 13px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    details.more { margin-top: 12px; }
+    details.more summary { cursor: pointer; font-weight: 700; }
+    details.more .post { margin-top: 8px; }
     @media (max-width: 640px) {
       h1 { font-size: 34px; }
       .row { flex-direction: column; }

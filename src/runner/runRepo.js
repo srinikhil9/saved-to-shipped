@@ -16,6 +16,8 @@ import {
   toolDirs,
 } from "./python.js";
 import {
+  consumerProductSmoke,
+  extractProducts,
   extractQuickstart,
   extractSample,
   generatedJavaScriptSmoke,
@@ -161,11 +163,9 @@ async function runRepo({
       language = detectLanguage(repoDir);
       const readmeName = fs.readdirSync(repoDir).find((name) => /^readme(\.|$)/i.test(name));
       const readme = readmeName ? fs.readFileSync(path.join(repoDir, readmeName), 'utf8') : '';
-      smoke = extractQuickstart(readme, language);
+      smoke = chooseSmoke({ repoUrl: repo.pageUrl, readme, language });
 
       if (language === 'python') {
-        if (!smoke) smoke = generatedPythonSmoke();
-        else if (smokeNeedsBasePackage(smoke.code)) smoke = baseSelectorSmoke();
         const prepared = await ensurePython({
           repoDir,
           env,
@@ -297,6 +297,7 @@ async function runRepo({
     }
 
     const extracted = extractSample(stdout);
+    const products = extractProducts(stdout);
     const runCommandLabel =
       commands.length > 0 ? commands[commands.length - 1].cmd : `${language} smoke`;
     const action = {
@@ -308,6 +309,8 @@ async function runRepo({
       run_duration_ms: runDuration,
       timestamp,
       extracted_sample: extracted,
+      products,
+      snippet: smoke?.code || null,
       stdout,
       stderr: (stderr || '').slice(-8000),
       timed_out: timedOut,
@@ -337,6 +340,7 @@ async function runRepo({
             timedOut,
             stdout: stdout || stderr,
             extracted,
+            products,
             source: smoke ? smoke.source : 'none',
             command: runCommandLabel,
           },
@@ -367,4 +371,16 @@ async function runRepo({
   }
 }
 
-export { runRepo, normalizeRepoUrl, RUN_TIMEOUT_MS };
+function chooseSmoke({ repoUrl, readme, language }) {
+  let smoke = extractQuickstart(readme, language);
+  if (language === "python") {
+    if (!smoke) smoke = generatedPythonSmoke();
+    else if (smokeNeedsBasePackage(smoke.code)) smoke = baseSelectorSmoke();
+  } else if (language === "javascript" && !smoke) {
+    smoke = generatedJavaScriptSmoke();
+  }
+  if (/\/D4Vinci\/Scrapling$/i.test(repoUrl || "")) smoke = consumerProductSmoke();
+  return smoke;
+}
+
+export { runRepo, normalizeRepoUrl, chooseSmoke, RUN_TIMEOUT_MS };

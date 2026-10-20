@@ -66,7 +66,7 @@ For `kind=repo`, `actOnRepo` calls `runRepo({ saveId, repoUrl })` in `src/runner
 1. Clones the GitHub repo into a fresh temp directory (no Docker).
 2. Detects Python or JavaScript. Before creating a venv it reads `requires-python` and probes `python3.13` down through `python3` (including `/opt/homebrew/bin` and `/usr/local/bin` on macOS). Scrapling asks for `>=3.10`. Python 3.9 cannot install it (`cssselect>=1.5.0` has no 3.9 build), so a too-old interpreter is not used for pip.
 3. If nothing on the machine satisfies that specifier, the runner installs uv into `.tools/uv` (or reuses `uv` already on `PATH`) and runs `uv python install 3.12`, then `uv venv --python 3.12`. The interpreter and wheel cache stay in `.tools/` so a warm run fits the demo budget. uv is spawned with the same scrubbed environment as git and pip, plus `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` pointing at that cache. No secrets are copied in.
-4. Once a new enough interpreter exists, install tries `.[fetchers]`, then the base project (`.`), then `pip install scrapling` from PyPI. The step that succeeded is stored as `install_step`. Failed stderr tails are stored as `install_stderr` and shown on the card. The smoke script uses the base package only (`urllib` + `scrapling.Selector` on https://quotes.toscrape.com), not the browser fetchers.
+4. Once a new enough interpreter exists, install tries `.[fetchers]`, then the base project (`.`), then `pip install scrapling` from PyPI. The step that succeeded is stored as `install_step`. Failed stderr tails are stored as `install_stderr` and shown on the card. Other repos whose README imports `scrapling.fetchers` fall back to a base-package quotes smoke. Scrapling itself always runs the consumer-product scrape: `Fetcher.get` when that extra installed, otherwise `urllib` against https://yc-oss.github.io/api/tags/consumer.json. The YC directory page is a client-rendered shell, so the JSON endpoint is what the scrape reads.
 5. If uv still cannot provide 3.12, the card records `needs Python >=3.10, found 3.9.6` and replays the cached run.
 6. Kills the process tree if the run exceeds 90 seconds. Clone and install have separate ceilings, and each install step leaves time for the next one inside the demo budget.
 7. Builds a fresh allowlist for every child (`PATH`, `HOME` and `TMPDIR` set to the temp dir, `LANG`, plus pip/npm/uv settings). `spawn` never receives `process.env` or a spread of it. A parent `OPENAI_API_KEY`, `*_KEY`, or `*_TOKEN` is not visible in the child. `test/runner.test.js` dumps the child environment and checks that.
@@ -86,7 +86,7 @@ Regenerate the committed Scrapling cache after a real run:
 npm run seed:scrapling
 ```
 
-The detail page heading **Show last run** renders that cached screenshot and stdout with no further network.
+The detail page heading **Show last run** renders that cached screenshot and stdout with no further network. The Scrapling detail page leads with a verdict (how long the cached run took, the why-you line, the snippet, and a next step) and a table of those products. The post, the sorted-by note, and raw stdout sit in a collapsed Details section. Offline replay still uses the committed cache.
 
 ## Paper and idea
 
