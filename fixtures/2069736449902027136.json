@@ -1,0 +1,37 @@
+{
+  "id": "2069736449902027136",
+  "url": "https://x.com/0xCodez/status/2069736449902027136",
+  "author": "Codez",
+  "handle": "0xCodez",
+  "posted_at": "2026-06-24T10:56:38.000Z",
+  "text": "A senior Anthropic engineer just dropped 11-page PDF on \"Loop Engineering\" for agentic systems.\n\nThe shift: you stop prompting the agent. You build the system that prompts it instead.\n\nSchedule → Discover → Build → Verify → Repeat\n\nEvery loop runs one turn, five moves:\n\n• Discovery: it finds its own work - failing CI, open issues, recent commits - instead of being handed a list.\n\n• Handoff: each task gets an isolated git worktree so parallel agents don't collide.\n\n• Verification: a second agent, told to assume the code is broken, reviews the first. The \"thing that can say no.\"\n\n• Persistence: results get written to disk, never left in a context window that gets flushed.\n\n• Scheduling: an automation wakes it on a timer. That's what makes it a loop.\n\nThe key insight: an agent grading its own work always praises it. \n\nThis 11-page PDF changed how I'm building agentic systems today.\n\nRead it now, then explore the article below.",
+  "links": [
+    {
+      "short": "https://t.co/yvV0sdZoeP",
+      "expanded": "https://x.com/0xCodez/status/2069736449902027136/photo/1"
+    },
+    {
+      "short": "https://t.co/eJB3TgyJwV",
+      "expanded": "http://x.com/i/article/2064357550225510400"
+    }
+  ],
+  "replies": [
+    {
+      "id": "2069738194673754312",
+      "author": "Codez",
+      "handle": "0xCodez",
+      "text": "https://t.co/njdN7u3uO9",
+      "links": [
+        {
+          "short": "https://t.co/njdN7u3uO9",
+          "expanded": "https://drive.google.com/file/d/1qzKI4DKnyHRpXK1J3ATPqwaqLc0iNu-M/view?usp=sharing"
+        }
+      ]
+    }
+  ],
+  "quote": {
+    "title": "Loop engineering: the 14-step roadmap from prompter to loop designer. ",
+    "url": "http://x.com/i/article/2064357550225510400"
+  },
+  "source": "Live post text from api.fxtwitter.com on 2026-10-20 (no API key). The PDF is the author self-reply (status 2069738194673754312), expanded from t.co/njdN7u3uO9. Quoted article URL expanded from t.co/eJB3TgyJwV via syndication."
+}

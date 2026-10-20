@@ -1,0 +1,6 @@
+{
+  "name": "Srinikhil",
+  "summary": "Srinikhil is building a startup that scrapes users' social media data to recommend niche consumer products from YC / a16z startups.",
+  "building": "a startup that scrapes users' social media data to recommend niche consumer products from YC / a16z startups",
+  "used_for": "The relevance step writes why_you from this profile. Step 1 stores it and does not call that step yet."
+}

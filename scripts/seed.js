@@ -1,0 +1,34 @@
+import { createSave, findSaveByUrl, getSave, openDb } from "../src/db.js";
+import { llmSettings, sanitizedEnv } from "../src/env.js";
+import { listFixturePosts } from "../src/ingest.js";
+import { paths } from "../src/paths.js";
+import { runPipeline } from "../src/pipeline.js";
+
+const offline = !process.argv.includes("--live");
+const db = openDb(process.env.DB_PATH || paths.db);
+const posts = listFixturePosts();
+
+if (!posts.length) {
+  console.error("No fixtures found in fixtures/");
+  process.exit(1);
+}
+
+for (const post of posts) {
+  const existing = findSaveByUrl(db, post.url);
+  if (existing) {
+    console.log(`already saved #${existing.id} ${existing.kind || existing.status} ${post.url}`);
+    continue;
+  }
+  const row = createSave(db, post.url);
+  await runPipeline(db, row.id, {
+    offline,
+    awaitLive: !offline,
+    llm: llmSettings(process.env),
+    childEnv: sanitizedEnv(process.env),
+  });
+  const done = getSave(db, row.id);
+  console.log(`#${done.id} ${done.status} ${done.kind || "-"} ${done.author || ""} ${post.url}`);
+  if (done.error) console.log(`  error: ${done.error}`);
+}
+
+db.close();

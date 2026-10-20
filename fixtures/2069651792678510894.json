@@ -1,0 +1,23 @@
+{
+  "id": "2069651792678510894",
+  "url": "https://x.com/cyrilXBT/status/2069651792678510894",
+  "author": "CyrilXBT",
+  "handle": "cyrilXBT",
+  "posted_at": "2026-06-24T05:20:14.000Z",
+  "text": "I genuinely don't understand why everyone isn't using this yet.\n\nAndrej Karpathy, OpenAI co-founder, posted a simple idea that went massively viral:\n\nStop using AI to write code.\nUse it to build a second brain.\n\nYou point Claude Code at a folder. Drop in any source: an article, a transcript, a PDF.\nClaude reads it, links it, files it into a living wiki of everything you know.\n\nIt compounds like interest. The more you feed it, the smarter it gets.\n\nHere's the whole thing:\n\n1) Install Obsidian\n2) Create a vault\n3) Open it in Claude Code\n4) Paste Karpathy's wiki idea and tell Claude to build it\n5) Claude makes three folders:\n   - raw (for sources)\n   - wiki (for its pages)\n   - CLAUDE. md (that runs it)\n6) Drop any source into raw and say: \"ingest this\"\n7) Ask questions across everything, forever\n\nFive minutes to set up and you never start from a blank chat again.\n\nFull step by step guide below.",
+  "links": [
+    {
+      "short": "https://t.co/ZYPFzAxhH3",
+      "expanded": "https://x.com/cyrilXBT/status/2069651792678510894/video/1"
+    },
+    {
+      "short": "https://t.co/Lm45mXDhiu",
+      "expanded": "http://x.com/i/article/2069404203361914880"
+    }
+  ],
+  "quote": {
+    "title": "50 Obsidian Workflows, Plugins, and Setups That Most Users Don't Know",
+    "url": "http://x.com/i/article/2069404203361914880"
+  },
+  "source": "Live post text from api.fxtwitter.com on 2026-10-20 (no API key). Quoted article URL expanded from t.co/Lm45mXDhiu via syndication."
+}
