@@ -1,6 +1,6 @@
 import { act } from "./act.js";
 import { classifyHeuristic, classifyWithGrok } from "./classify.js";
-import { getSave, updateSave } from "./db.js";
+import { getSave, updateSave, withoutPendingUpgrade } from "./db.js";
 import { expandPostLinks } from "./expand.js";
 import { combinedText, ingest, readSavedPost } from "./ingest.js";
 import { loadProfile } from "./profile.js";
@@ -195,7 +195,7 @@ function restoreSnapshot(db, id, snapshot, preserved = null) {
     why_you_source: snapshot.why_you_source === "pending" ? "template" : snapshot.why_you_source,
     why_you_profile_hash: snapshot.why_you_profile_hash,
     screenshot_path: preserved ? preserved.screenshot_path : snapshot.screenshot_path,
-    action_result_json: preserved ? preserved.json : snapshot.action_result_json,
+    action_result_json: withoutPendingUpgrade(preserved ? preserved.json : snapshot.action_result_json),
     error: null,
   });
 }

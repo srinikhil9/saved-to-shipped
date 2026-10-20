@@ -351,6 +351,7 @@ test("act:demo reads the committed seeds when runtime holds a grok spec", async 
   fs.writeFileSync(path.join(runtimeDir, "SPEC.md"), "# SPEC from Grok\n\nSrinikhil runtime copy that the demo must ignore.\n");
   try {
     const { stdout } = await execFileAsync(process.execPath, ["scripts/act-demo.js"], { cwd: paths.root });
+    assert.match(stdout, /Dropped Grok spec at data\/artifacts-runtime\/2069736449902027136/);
     assert.match(stdout, /act:demo ok/);
     assert.match(stdout, /source=template cached=true/);
     assert.ok(before.equals(fs.readFileSync(committedZip)));

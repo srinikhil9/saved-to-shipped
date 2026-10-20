@@ -32,7 +32,20 @@ for (const seed of SEEDS) {
   }
   // A Grok rebuild under data/artifacts-runtime/ would otherwise win and fail
   // this no-key check. The demo always reads the committed seed copies.
-  fs.rmSync(path.join(paths.artifactsRuntime, artifactKey(save)), { recursive: true, force: true });
+  const runtimeDir = path.join(paths.artifactsRuntime, artifactKey(save));
+  const runtimeManifest = path.join(runtimeDir, "manifest.json");
+  let runtimeSource = "";
+  try {
+    runtimeSource = JSON.parse(fs.readFileSync(runtimeManifest, "utf8")).source || "";
+  } catch {
+    runtimeSource = "";
+  }
+  if (fs.existsSync(runtimeDir)) {
+    fs.rmSync(runtimeDir, { recursive: true, force: true });
+    if (runtimeSource === "grok") {
+      console.log(`Dropped Grok spec at data/artifacts-runtime/${artifactKey(save)}`);
+    }
+  }
   const result = await act(save, { env: {}, force });
   const label = `${save.kind} ${path.basename(path.dirname(result.zipPath))}`;
   console.log(`\n${label}  source=${result.source} cached=${result.cached}`);
