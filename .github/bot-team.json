@@ -1,0 +1,15 @@
+{
+  "note": "Used when a pull request has no bot label and no 'Bot:' line. Pull request number wins, then the first matching branch prefix.",
+  "prs": {
+    "1": "builder",
+    "2": "builder 2",
+    "3": "builder 3",
+    "4": "builder 3"
+  },
+  "branchPrefixes": [
+    { "prefix": "cursor/paste-url", "bot": "builder" },
+    { "prefix": "cursor/repo-runner", "bot": "builder 2" },
+    { "prefix": "cursor/why-you", "bot": "builder 3" },
+    { "prefix": "cursor/paper-idea", "bot": "builder 3" }
+  ]
+}
