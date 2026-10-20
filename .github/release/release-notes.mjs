@@ -229,7 +229,7 @@ function whatItDoes(pull) {
 
 function trackerNote(body) {
   const line = String(body || "").trim().split(/\r?\n/, 1)[0] || "";
-  const match = line.match(/^tracker (re-review|review):\s*([\s\S]*)$/i);
+  const match = line.match(/^tracker (re-review|review)(?:\s*\([^)]*\))?\s*:\s*([\s\S]*)$/i);
   if (!match) return null;
   const kind = match[1].toLowerCase() === "re-review" ? "re-review" : "review";
   const raw = match[2].trim();
@@ -626,6 +626,10 @@ function selfCheck() {
     trackerNote("tracker re-review: **passes, with 1 follow-up fix.** All four.")?.verdict === "passes, with 1 follow-up fix",
     "tracker re-review",
   );
+  assert(trackerNote("tracker review (addendum): needs fixes")?.verdict === "needs fixes", "tracker review addendum");
+  assert(trackerNote("tracker review (addendum): needs fixes")?.kind === "review", "addendum is a review");
+  const rereview = trackerNote("tracker re-review (PR #1): **passes.**");
+  assert(rereview?.verdict === "passes" && rereview?.kind === "re-review", "tracker re-review with a parenthetical");
   assert(trackerNote("Looks good.") === null, "ignore other comments");
   const first = renderNotes({
     title: "Example: PRs #1-#4",

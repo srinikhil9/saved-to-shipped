@@ -4,7 +4,7 @@ The release bot writes plain-English notes for the pull requests that landed on 
 
 - **thinker** wrote the spec.
 - **builder**, **builder 2**, and **builder 3** build features. A `bot:` label or a `Bot:` line in the pull request wins. Otherwise the bot reads `.github/bot-team.json`: pull request number, then branch prefix. `cursor/release-bot` is **builder 3**.
-- **tracker** reviews. A pull request comment that starts with `tracker review:` or `tracker re-review:` is quoted in the notes.
+- **tracker** reviews. A pull request comment that starts with `tracker review:` or `tracker re-review:` is quoted in the notes. A parenthetical before the colon is fine, as in `tracker review (addendum):` or `tracker re-review (PR #1):`.
 
 This bot does not use the app's root `package.json` or `README.md`. The script and its npm script live in `.github/release/`.
 
