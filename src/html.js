@@ -219,9 +219,24 @@ function formatRunSeconds(ms) {
 function verdictMarkup(act) {
   if (lastGoodAfterFailure(act) && act.timestamp) {
     const iso = escapeHtml(act.timestamp);
-    return `Works (last good run, <time datetime="${iso}"></time>); latest run failed`;
+    const label = escapeHtml(formatUtcStamp(act.timestamp));
+    return `Works (last good run, <time datetime="${iso}">${label}</time>); latest run failed`;
   }
   return escapeHtml(verdictLine(act));
+}
+
+function formatUtcStamp(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return String(iso);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date);
 }
 
 function localTimeScript(act) {

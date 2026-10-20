@@ -149,10 +149,15 @@ test("a fallback to the last good run says so in the visible verdict", () => {
   );
   const detailsAt = html.indexOf("<details");
   const verdict = html.slice(html.lastIndexOf("<section", html.indexOf('id="verdict"')), detailsAt);
+  const shown = "Oct 20, 2026, 2:12 AM UTC";
   assert.match(
     verdict,
-    new RegExp(`Works \\(last good run, <time datetime="${escapeRegExp(when)}"><\\/time>\\); latest run failed`),
+    new RegExp(`Works \\(last good run, <time datetime="${escapeRegExp(when)}">${escapeRegExp(shown)}<\\/time>\\); latest run failed`),
   );
+  const timeText = verdict.match(/<time datetime="[^"]*">([^<]*)<\/time>/);
+  assert.ok(timeText);
+  assert.notEqual(timeText[1].trim(), "");
+  assert.equal(timeText[1], shown);
   assert.doesNotMatch(verdict.replace(/datetime="[^"]*"/g, ""), new RegExp(escapeRegExp(when)));
   assert.match(verdict, /class="verdict works"/);
   assert.doesNotMatch(verdict, /Works: installed and ran/);
