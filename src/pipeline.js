@@ -185,7 +185,7 @@ function restoreSnapshot(db, id, snapshot, preserved = null) {
     kind: snapshot.kind,
     summary: snapshot.summary,
     why_you: snapshot.why_you,
-    why_you_source: snapshot.why_you_source,
+    why_you_source: snapshot.why_you_source === "pending" ? "template" : snapshot.why_you_source,
     why_you_profile_hash: snapshot.why_you_profile_hash,
     screenshot_path: preserved ? preserved.screenshot_path : snapshot.screenshot_path,
     action_result_json: preserved ? preserved.json : snapshot.action_result_json,

@@ -115,6 +115,7 @@ export function failStuckSaves(db) {
       cleared += 1;
     }
   }
+  db.prepare("UPDATE saves SET why_you_source = 'template' WHERE why_you_source = 'pending'").run();
   return { failed, restored, cleared, total: stuck.length };
 }
 
