@@ -159,6 +159,68 @@ test("startup clears a pending why_you so the detail page stops reloading", () =
   db.close();
 });
 
+test("startup clears a pending paper spec and leaves the template zip", () => {
+  const db = openDb(":memory:");
+  const row = createSave(db, "https://x.com/0xCodez/status/2069736449902027136");
+  updateSave(db, row.id, {
+    status: "done",
+    kind: "paper",
+    summary: "Loop Engineering.",
+    why_you: "A blueprint for running your scrape-and-recommend agents as a self-verifying loop; Saved to Shipped is one.",
+    why_you_source: "template",
+    action_result_json: JSON.stringify({
+      sorted: { source: "heuristic", upgrade: "pending" },
+      act: {
+        status: "done",
+        type: "spec",
+        source: "pending",
+        upgrade: "pending",
+        zipUrl: "/artifacts/2069736449902027136/loop-engineering.zip",
+      },
+    }),
+  });
+
+  failStuckSaves(db);
+  const settled = getSave(db, row.id);
+  const action = JSON.parse(settled.action_result_json);
+  assert.equal(settled.status, "done");
+  assert.equal(action.act.source, "template");
+  assert.equal(action.act.upgrade, null);
+  assert.equal(action.sorted.upgrade, null);
+  assert.equal(action.act.zipUrl, "/artifacts/2069736449902027136/loop-engineering.zip");
+  assert.doesNotMatch(renderDetail(settled), /location\.reload/);
+  db.close();
+});
+
+test("a failed rerun does not restore a pending paper spec", async () => {
+  const db = openDb(":memory:");
+  const row = createSave(db, "https://x.com/nobody/status/999");
+  updateSave(db, row.id, {
+    status: "done",
+    kind: "paper",
+    summary: "kept",
+    why_you: "A paper to read against your social-data recommender.",
+    why_you_source: "template",
+    action_result_json: JSON.stringify({
+      sorted: { source: "heuristic" },
+      act: { status: "done", type: "spec", source: "pending", zipUrl: "/artifacts/abc/paper-starter.zip" },
+    }),
+  });
+
+  const again = await runPipeline(db, row.id, {
+    offline: true,
+    llm: { apiKey: "" },
+    fetchImpl: async () => {
+      throw new Error("down");
+    },
+  });
+  assert.equal(again.status, "done");
+  assert.equal(JSON.parse(again.action_result_json).act.source, "template");
+  assert.equal(JSON.parse(again.action_result_json).act.zipUrl, "/artifacts/abc/paper-starter.zip");
+  assert.doesNotMatch(renderDetail(again), /location\.reload/);
+  db.close();
+});
+
 test("a failed rerun does not restore a pending why_you", async () => {
   const db = openDb(":memory:");
   const row = createSave(db, "https://x.com/nobody/status/999");

@@ -119,7 +119,7 @@ export function failStuckSaves(db) {
   return { failed, restored, cleared, total: stuck.length };
 }
 
-function withoutPendingUpgrade(json) {
+export function withoutPendingUpgrade(json) {
   if (!json) return json;
   let action;
   try {
@@ -127,8 +127,20 @@ function withoutPendingUpgrade(json) {
   } catch {
     return json;
   }
-  if (action?.sorted?.upgrade !== "pending") return json;
-  action.sorted.upgrade = null;
+  let changed = false;
+  if (action?.sorted?.upgrade === "pending") {
+    action.sorted.upgrade = null;
+    changed = true;
+  }
+  if (action?.act?.source === "pending") {
+    action.act.source = "template";
+    changed = true;
+  }
+  if (action?.act?.upgrade === "pending") {
+    action.act.upgrade = null;
+    changed = true;
+  }
+  if (!changed) return json;
   return JSON.stringify(action);
 }
 

@@ -10,6 +10,7 @@ Requires Node.js 22 or newer. `.nvmrc` is `24` (the demo laptop is Node v24.14.0
 npm install
 npm test
 npm run prepare-python
+npm run act:demo
 npm run seed
 npm start
 ```
@@ -46,7 +47,7 @@ With no `XAI_API_KEY`, a regex/heuristic decides the kind: a `github.com/owner/r
 
 Set `XAI_API_KEY` to sort with Grok. The call goes to `https://api.x.ai/v1` and the default model is `grok-4.7` (`XAI_MODEL` overrides it). grok-4.7 accepts `reasoning_effort` (`low`, `medium`, `high`, `xhigh`; the default is `high`), `temperature` (0–2), and `response_format` `json_object`. This app sends `reasoning_effort: "low"`, `temperature: 0`, and `response_format: { "type": "json_object" }`, and gives the call 8 seconds. If the API rejects `reasoning_effort`, that field is dropped and the call is retried once.
 
-The regex result is saved on the card first. Grok replaces that result in place when it answers. A live refresh of the same save does not call Grok again. A failed or timed-out call leaves the regex result. The key is not passed into the child environment the repo runner will use.
+The regex result is saved on the card first. Grok replaces that result in place when it answers. A live refresh of the same save does not call Grok again. A failed or timed-out call leaves the regex result. The key is not passed into the child environment the repo runner will use. Paper and idea specs use that same client; see below.
 
 The detail page reloads on its own while a save is still running or a Grok upgrade is in flight. If the server stops during Run again, a card that already has a finished result comes back as that result. A first run that never finished is marked failed.
 
@@ -56,7 +57,7 @@ SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `so
 
 `data/profile.json` is Srinikhil's profile. After a save is sorted, on either the Grok sort path or the no-key path, the pipeline writes a one-line `why_you` immediately: a short template per kind (`your social-data recommender`) plus keyword hits that cover the likely kinds for each seed (a scraping repo or tool, Loop Engineering as a paper or idea, the second brain as an idea, paper, or other). When `XAI_API_KEY` is set, Grok (`https://api.x.ai/v1`, `grok-4.7`, `reasoning_effort: low`, about 8 seconds) rewrites that line in the background from the profile and the post summary. The Grok line is stored on the row (`why_you_source` + profile hash) and reused offline, so a replay does not call again. No key, a timeout, or an error leaves the template. Empty rows that already have a kind are filled on startup, on seed, or on rerun. The line shows on the feed card and the detail page.
 
-`src/act.js` runs repos. Paper, idea, tool, and event actions are still stubs.
+`src/act.js` runs repos, and writes a spec plus a starter zip for papers and ideas. Tool and event actions are still stubs.
 
 ## Repo runner
 
@@ -86,3 +87,15 @@ npm run seed:scrapling
 ```
 
 The detail page heading **Show last run** renders that cached screenshot and stdout with no further network.
+
+## Paper and idea
+
+For those two kinds the act stage writes a one-page `SPEC.md` aimed at the startup in `data/profile.json`, plus a starter folder, and zips them. The feed card and the save page link the zip (`/artifacts/<status id>/<name>.zip`) and `SPEC.md`.
+
+- Loop Engineering (paper) → `loop/` with `schedule.mjs`, `discover.mjs`, `build.mjs`, and `verify.mjs`. The spec applies Schedule → Discover → Build → Verify → Repeat to the scrape → recommend pipeline, and notes that Saved to Shipped is the same loop.
+- Karpathy's second brain (idea) → `sources/`, `wiki/`, and `INSTRUCTIONS.md` (how an agent ingests a source into linked wiki pages). The wiki is seeded with an index, a product template, a founder template, and one example signal.
+- Any other paper or idea gets the same spec-plus-zip shape with a smaller `starter/` checklist.
+
+Committed seed zips live in `data/artifacts/<status id>/` and are only read. A rerun reuses them. `POST /api/saves/:id/rerun` with `{"force": true}` writes a fresh copy under `data/artifacts-runtime/` (gitignored) and the server prefers that copy. `npm run act:demo` runs both seeds with no API key. It drops any `data/artifacts-runtime/` copy of those seeds first, then reads the committed files, so an earlier Grok spec cannot change the result. The committed files stay untouched.
+
+The card is marked done from the template zip. When `XAI_API_KEY` is set, Grok then replaces `SPEC.md` in the background using `llmSettings` from `src/env.js` (`https://api.x.ai/v1`, `grok-4.7`, `XAI_MODEL` to override): `reasoning_effort: "low"`, an 8 second timeout, and one retry without that field if the API returns 400. No key, or any error, leaves the template. The repo runner still receives only the sanitized child environment, not the key.

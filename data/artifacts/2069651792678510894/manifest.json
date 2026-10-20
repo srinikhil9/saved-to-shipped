@@ -1,0 +1,20 @@
+{
+  "generator": "step4-v1",
+  "profileHash": "60bb33ed35c9",
+  "type": "starter",
+  "status": "done",
+  "source": "template",
+  "summary": "A starter wiki (sources/, wiki/, INSTRUCTIONS.md) for filing YC and a16z products against what users post, plus a one-page spec.",
+  "zipName": "second-brain.zip",
+  "files": [
+    "SPEC.md",
+    "INSTRUCTIONS.md",
+    "sources/README.md",
+    "sources/example-evening-skincare.md",
+    "wiki/index.md",
+    "wiki/product.md",
+    "wiki/founder.md",
+    "wiki/signal-evening-skincare.md",
+    "wiki/log.md"
+  ]
+}

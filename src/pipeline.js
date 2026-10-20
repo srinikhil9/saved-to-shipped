@@ -1,6 +1,6 @@
 import { act } from "./act.js";
 import { classifyHeuristic, classifyWithGrok } from "./classify.js";
-import { getSave, updateSave } from "./db.js";
+import { getSave, updateSave, withoutPendingUpgrade } from "./db.js";
 import { expandPostLinks } from "./expand.js";
 import { combinedText, ingest, readSavedPost } from "./ingest.js";
 import { loadProfile } from "./profile.js";
@@ -22,6 +22,7 @@ const whyJobs = new WeakMap();
  * The regex result, including its template why_you, is stored before Grok.
  * One Grok flight runs per pipeline generation. Grok re-runs the repo only
  * when the kind or repo URL changed.
+ * Paper and idea actions add a spec and a starter zip.
  */
 export async function runPipeline(db, id, options = {}) {
   const existing = getSave(db, id);
@@ -82,7 +83,7 @@ async function storeSorted(db, id, post, options) {
   const current = getSave(db, id);
   const action = await act(
     { ...current, kind: basis.kind, details: basis.details, previous: snapshot },
-    actOptions(options),
+    { ...actOptions(options), db },
   );
   if (generation !== generationOf(db, id)) return getSave(db, id);
 
@@ -95,6 +96,8 @@ async function storeSorted(db, id, post, options) {
   const latest = getSave(db, id);
   const plan = planSort(latest, basis, generation, options.llm);
   const storedAct = plan.keepAct && action?.status !== "ok" && !action?.attempt_error ? plan.keepAct : action;
+  const specUpgrade = storedAct?.upgrade;
+  if (storedAct && specUpgrade) delete storedAct.upgrade;
   const screenshotPath =
     storedAct?.screenshot_path || (storedAct?.warning ? snapshot?.screenshot_path || latest?.screenshot_path || null : null);
   rememberSortedWhy(db, id, post, plan, options);
@@ -119,6 +122,10 @@ async function storeSorted(db, id, post, options) {
     }),
     error: failed ? action?.error || "Repo run failed" : null,
   });
+  if (specUpgrade) {
+    const pendingSpec = specUpgrade();
+    if (options.awaitSpec) await pendingSpec;
+  }
 
   if (plan.schedule && reserveFlight(db, id, generation)) {
     const upgrade = classifyWithGrok(input, basis, {
@@ -188,7 +195,7 @@ function restoreSnapshot(db, id, snapshot, preserved = null) {
     why_you_source: snapshot.why_you_source === "pending" ? "template" : snapshot.why_you_source,
     why_you_profile_hash: snapshot.why_you_profile_hash,
     screenshot_path: preserved ? preserved.screenshot_path : snapshot.screenshot_path,
-    action_result_json: preserved ? preserved.json : snapshot.action_result_json,
+    action_result_json: withoutPendingUpgrade(preserved ? preserved.json : snapshot.action_result_json),
     error: null,
   });
 }
@@ -221,6 +228,13 @@ function actOptions(options) {
     demoBudgetMs: options.demoBudgetMs,
     runRepo: options.runRepo,
     screenshotDir: options.screenshotDir,
+    env: options.childEnv || {},
+    llm: options.llm,
+    fetchImpl: options.llmFetch,
+    force: options.force === true,
+    profile: options.profile,
+    awaitSpec: options.awaitSpec === true,
+    specTimeoutMs: options.specTimeoutMs,
   };
 }
 
@@ -235,7 +249,6 @@ async function applyUpgrade(db, id, generation, upgraded, options) {
     updateSave(db, id, { action_result_json: JSON.stringify(action) });
     return;
   }
-
   const previousUrl = action.sorted.details?.repo_url || null;
   const incomingUrl = upgraded.details?.repo_url || null;
   const nextUrl = incomingUrl || previousUrl;
@@ -246,7 +259,7 @@ async function applyUpgrade(db, id, generation, upgraded, options) {
   if (kindChanged || urlChanged) {
     acted = await act(
       { ...row, kind: upgraded.kind, details: nextDetails, previous: options.snapshot },
-      { ...actOptions(options), repoMode: options.offline ? "cache" : "live" },
+      { ...actOptions(options), db, repoMode: options.offline ? "cache" : "live" },
     );
   }
   if (generation !== generationOf(db, id)) return;
@@ -256,7 +269,12 @@ async function applyUpgrade(db, id, generation, upgraded, options) {
   latestAction.sorted.source = "llm";
   latestAction.sorted.details = nextDetails;
   latestAction.sorted.upgrade = "done";
-  latestAction.act = acted;
+  if (kindChanged || urlChanged) {
+    const specUpgrade = acted?.upgrade;
+    if (acted && specUpgrade) delete acted.upgrade;
+    latestAction.act = acted;
+    if (specUpgrade) specUpgrade();
+  }
   const summary = upgraded.summary || latest.summary;
   const patch = {
     status: "done",
