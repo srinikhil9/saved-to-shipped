@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { detectBrowser } from "../src/runner/browser.js";
 import { detectLanguage, readOptionalDeps } from "../src/runner/detect.js";
 import { allowlistedEnv, envForSpawn, SECRET_ENV_NAME } from "../src/runner/env.js";
 import { runCommand } from "../src/runner/exec.js";
@@ -137,8 +138,14 @@ test('screenshot html shows extracted quotes', () => {
 });
 
 test('screenshot png is a real image', async (t) => {
-  const chrome = process.env.CHROME_PATH || '/usr/local/bin/google-chrome';
-  if (!fs.existsSync(chrome)) {
+  let found;
+  try {
+    found = detectBrowser();
+  } catch (error) {
+    t.skip(error instanceof Error ? error.message : 'Chrome is not installed');
+    return;
+  }
+  if (!found.executablePath) {
     t.skip('Chrome is not installed');
     return;
   }
