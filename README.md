@@ -41,7 +41,11 @@ A successful live read is written to `data/live-cache/` and reused when the netw
 
 With no `XAI_API_KEY`, a regex/heuristic decides the kind: a `github.com/owner/repo` URL is a repo, an arXiv or `.pdf` URL (or an "N-page PDF") is a paper, and so on.
 
-Set `XAI_API_KEY` to sort with Grok instead. The call goes to `https://api.x.ai/v1` and the default model is `grok-4.7`. Set `XAI_MODEL` to use a different Grok model. A failed model call falls back to the heuristic. The key is not passed into the child environment the repo runner will use.
+Set `XAI_API_KEY` to sort with Grok. The call goes to `https://api.x.ai/v1` and the default model is `grok-4.7` (`XAI_MODEL` overrides it). grok-4.7 accepts `reasoning_effort` (`low`, `medium`, `high`, `xhigh`; the default is `high`), `temperature` (0–2), and `response_format` `json_object`. This app sends `reasoning_effort: "low"`, `temperature: 0`, and `response_format: { "type": "json_object" }`, and gives the call 8 seconds. If the API rejects `reasoning_effort`, that field is dropped and the call is retried once.
+
+The regex result is saved on the card first. Grok replaces that result in place when it answers. A live refresh of the same save does not call Grok again. A failed or timed-out call leaves the regex result. The key is not passed into the child environment the repo runner will use.
+
+The detail page reloads on its own while a save is still running or a Grok upgrade is in flight. If the server stops during Run again, a card that already has a finished result comes back as that result. A first run that never finished is marked failed.
 
 ## Data
 

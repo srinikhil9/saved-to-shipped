@@ -1,4 +1,5 @@
 import { llmSettings } from "./env.js";
+import { LLM_TIMEOUT_MS } from "./limits.js";
 
 const KINDS = new Set(["repo", "tool", "paper", "idea", "event", "other"]);
 const RESERVED_GITHUB = new Set([
@@ -29,14 +30,27 @@ export async function classify(input, options = {}) {
   const heuristic = classifyHeuristic(input);
   const llmConfig = options.llm || llmSettings(options.env || process.env);
   if (!llmConfig.apiKey) return heuristic;
+  const upgraded = await classifyWithGrok(input, heuristic, { ...options, llm: llmConfig });
+  return upgraded || heuristic;
+}
+
+/**
+ * One Grok call. Returns null when the key is missing or the call fails,
+ * so the caller can keep the heuristic result.
+ */
+export async function classifyWithGrok(input, heuristic, options = {}) {
+  const llmConfig = options.llm || llmSettings(options.env || process.env);
+  if (!llmConfig.apiKey) return null;
   try {
-    const llm = await classifyWithLlm(input, {
+    const llm = await requestGrok(input, {
       apiKey: llmConfig.apiKey,
       baseUrl: llmConfig.baseUrl,
       model: llmConfig.model,
       fetchImpl: options.fetchImpl || globalThis.fetch,
+      timeoutMs: options.timeoutMs ?? LLM_TIMEOUT_MS,
+      signalFactory: options.signalFactory,
     });
-    if (!llm) return heuristic;
+    if (!llm) return null;
     return {
       kind: llm.kind,
       summary: llm.summary || heuristic.summary,
@@ -49,7 +63,7 @@ export async function classify(input, options = {}) {
       },
     };
   } catch {
-    return heuristic;
+    return null;
   }
 }
 
@@ -92,7 +106,7 @@ export function summarize(text) {
   return `${summary.slice(0, 197).trimEnd()}…`;
 }
 
-async function classifyWithLlm(input, { apiKey, baseUrl, model, fetchImpl }) {
+function grokBody(model, input, reasoning) {
   const body = {
     model,
     temperature: 0,
@@ -112,15 +126,37 @@ async function classifyWithLlm(input, { apiKey, baseUrl, model, fetchImpl }) {
       },
     ],
   };
-  const response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  // grok-4.7 accepts low | medium | high | xhigh. Default is high, which is
+  // slow for a short classify. The chat schema's "only grok-4.3" note is stale.
+  if (reasoning) body.reasoning_effort = "low";
+  return body;
+}
+
+async function requestGrok(input, options) {
+  const first = await postGrok(input, options, true);
+  if (first.status === 400) {
+    const text = await first.text();
+    if (/reasoning[_ ]?effort/i.test(text)) return readGrok(await postGrok(input, options, false));
+    throw new Error("LLM returned 400");
+  }
+  return readGrok(first);
+}
+
+async function postGrok(input, { apiKey, baseUrl, model, fetchImpl, timeoutMs, signalFactory }, reasoning) {
+  const limit = timeoutMs ?? LLM_TIMEOUT_MS;
+  const signal = signalFactory ? signalFactory(limit) : AbortSignal.timeout(limit);
+  return fetchImpl(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${apiKey}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(20000),
+    body: JSON.stringify(grokBody(model, input, reasoning)),
+    signal,
   });
+}
+
+async function readGrok(response) {
   if (!response.ok) throw new Error(`LLM returned ${response.status}`);
   const payload = await response.json();
   const content = payload?.choices?.[0]?.message?.content || "";
