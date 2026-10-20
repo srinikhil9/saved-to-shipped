@@ -1,3 +1,5 @@
+import { renderFileList, renderZipLink } from "./act/snippet.js";
+
 const KINDS = ["repo", "tool", "paper", "idea", "event", "other"];
 
 export function renderFeed(saves) {
@@ -9,7 +11,7 @@ export function renderFeed(saves) {
         <div>
           <p class="brand">Saved to Shipped</p>
           <h1>Save it. Ship it.</h1>
-          <p class="lede">Paste a public X post. It lands in the feed, then gets sorted into a repo, paper, idea, tool, or event.</p>
+          <p class="lede">Paste a public X post. It lands in the feed, then gets sorted into a repo, paper, idea, tool, or event. A paper or an idea comes back as a spec and a starter zip.</p>
         </div>
       </header>
       <form class="paste" method="post" action="/api/saves">
@@ -89,6 +91,7 @@ export function renderDetail(save) {
         </div>
         <h1>${escapeHtml(save.author || save.url)}</h1>
         ${save.summary ? `<p class="summary">${escapeHtml(save.summary)}</p>` : ""}
+        ${renderZipLink(act)}
         <p class="source"><a href="${escapeHtml(save.url)}">${escapeHtml(save.url)}</a></p>
         ${save.text ? `<pre class="post">${escapeHtml(save.text)}</pre>` : ""}
         ${action?.sorted?.reply_text ? `<h2>Also in the thread</h2><pre class="post">${escapeHtml(action.sorted.reply_text)}</pre>` : ""}
@@ -129,6 +132,8 @@ function renderCard(save) {
       <h2><a href="/saves/${save.id}">${escapeHtml(cardTitle(save))}</a></h2>
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
       ${save.why_you ? `<p class="why">${escapeHtml(save.why_you)}</p>` : ""}
+      ${action?.act?.zipUrl ? `<p class="action-summary">${escapeHtml(action.act.summary || "")}</p>` : ""}
+      ${renderZipLink(action?.act)}
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
       ${action?.act?.status === "cached" ? `<span class="badge other">cached</span>` : ""}
       ${action?.act?.fallback_note ? `<p class="repo">${escapeHtml(action.act.fallback_note)}</p>` : ""}
@@ -141,6 +146,14 @@ function renderCard(save) {
 }
 
 function renderLastRun(save, act) {
+  if (act?.zipUrl) {
+    return `
+      <p>${escapeHtml(act.summary || "Spec and starter are ready.")}</p>
+      ${renderZipLink(act)}
+      ${renderFileList(act.files)}
+      <p class="note">${act.cached ? "Cached on disk. Run again reuses this zip." : "Written just now. The next run reuses this zip."}</p>
+    `;
+  }
   const sample = Array.isArray(act?.extracted_sample) ? act.extracted_sample : [];
   const parts = [];
   if (act?.status === "cached") parts.push(`<p class="badge other">cached</p>`);
@@ -282,7 +295,11 @@ function layout({ title, body }) {
     .status.acting { background: #f8edd8; color: var(--warn); }
     .status.done { background: #e5f4ea; color: var(--good); }
     .status.failed { background: #fde8e4; color: var(--bad); }
-    .repo { font-size: 14px; word-break: break-all; }
+    .repo, .artifact { font-size: 14px; word-break: break-all; }
+    .action-summary, .note { color: var(--muted); font-size: 15px; }
+    .artifact a { font-weight: 700; }
+    .files { margin: 8px 0 0; padding-left: 18px; }
+    .files code { font-size: 14px; }
     .empty { color: var(--muted); }
     .post {
       white-space: pre-wrap;

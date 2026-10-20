@@ -1,4 +1,5 @@
 import express from "express";
+import { mountArtifacts } from "./act/serve.js";
 import { createSave, findSaveByUrl, getSave, listSaves, publicSave, updateSave } from "./db.js";
 import { llmSettings, sanitizedEnv } from "./env.js";
 import { renderCards, renderDetail, renderFeed, renderNotFound } from "./html.js";
@@ -34,6 +35,7 @@ export function createApp(db, options = {}) {
   app.use(express.json({ limit: "32kb" }));
   app.use(express.urlencoded({ extended: false }));
   app.use("/screenshots", express.static(paths.screenshots));
+  mountArtifacts(app);
 
   app.get("/", (_req, res) => {
     res.type("html").send(renderFeed(listSaves(db)));
@@ -81,7 +83,7 @@ export function createApp(db, options = {}) {
       return wantsHtml(req) ? res.redirect(303, "/") : res.status(404).json({ error: "Save not found" });
     }
     const row = updateSave(db, save.id, { status: "queued", error: null });
-    startPipeline(db, row.id, pipelineOptions);
+    startPipeline(db, row.id, { ...pipelineOptions, force: readForce(req) });
     if (wantsHtml(req)) return res.redirect(303, `/saves/${row.id}`);
     res.json(publicSave(row));
   });
@@ -100,6 +102,12 @@ function startPipeline(db, id, options) {
 function loadRow(db, id) {
   if (!/^\d+$/.test(String(id))) return null;
   return getSave(db, Number(id));
+}
+
+function readForce(req) {
+  if (req.query?.force === "1") return true;
+  const value = req.body?.force;
+  return value === true || value === "1" || value === "true";
 }
 
 function readUrl(req) {

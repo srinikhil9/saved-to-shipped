@@ -8,3 +8,4 @@ data/screenshots/
 data/pip-cache/
 data/live-cache/
 .tools/
+data/artifacts/**/loop/state/*.json

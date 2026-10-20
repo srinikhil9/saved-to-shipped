@@ -22,6 +22,7 @@ const whyJobs = new WeakMap();
  * The regex result, including its template why_you, is stored before Grok.
  * One Grok flight runs per pipeline generation. Grok re-runs the repo only
  * when the kind or repo URL changed.
+ * Paper and idea actions add a spec and a starter zip.
  */
 export async function runPipeline(db, id, options = {}) {
   const existing = getSave(db, id);
@@ -82,7 +83,7 @@ async function storeSorted(db, id, post, options) {
   const current = getSave(db, id);
   const action = await act(
     { ...current, kind: basis.kind, details: basis.details, previous: snapshot },
-    actOptions(options),
+    { ...actOptions(options), db },
   );
   if (generation !== generationOf(db, id)) return getSave(db, id);
 
@@ -221,6 +222,13 @@ function actOptions(options) {
     demoBudgetMs: options.demoBudgetMs,
     runRepo: options.runRepo,
     screenshotDir: options.screenshotDir,
+    env: options.childEnv || {},
+    llm: options.llm,
+    fetchImpl: options.llmFetch,
+    force: options.force === true,
+    profile: options.profile,
+    awaitSpec: options.awaitSpec === true,
+    specTimeoutMs: options.specTimeoutMs,
   };
 }
 
@@ -235,7 +243,6 @@ async function applyUpgrade(db, id, generation, upgraded, options) {
     updateSave(db, id, { action_result_json: JSON.stringify(action) });
     return;
   }
-
   const previousUrl = action.sorted.details?.repo_url || null;
   const incomingUrl = upgraded.details?.repo_url || null;
   const nextUrl = incomingUrl || previousUrl;
@@ -246,7 +253,7 @@ async function applyUpgrade(db, id, generation, upgraded, options) {
   if (kindChanged || urlChanged) {
     acted = await act(
       { ...row, kind: upgraded.kind, details: nextDetails, previous: options.snapshot },
-      { ...actOptions(options), repoMode: options.offline ? "cache" : "live" },
+      { ...actOptions(options), db, repoMode: options.offline ? "cache" : "live" },
     );
   }
   if (generation !== generationOf(db, id)) return;

@@ -5,6 +5,7 @@ import { paths } from "./paths.js";
 import { restoreCachedScreenshots } from "./runner/cache.js";
 
 fs.mkdirSync(paths.screenshots, { recursive: true });
+fs.mkdirSync(paths.artifacts, { recursive: true });
 restoreCachedScreenshots();
 
 const db = openDb(process.env.DB_PATH || paths.db);
