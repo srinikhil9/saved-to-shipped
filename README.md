@@ -1,8 +1,6 @@
 # Saved to Shipped
 
-Paste a public X post. It shows up in the feed as a card, then gets sorted: repo, paper, idea, tool, event, or other.
-
-This is step 1. Sorting works with no API keys. The act stage (clone a repo, run it, screenshot it) is the next step.
+Paste a public X post. It shows up in the feed as a card, then gets sorted: repo, paper, idea, tool, event, or other. A repo save is cloned, installed, and run. The detail page replays the last run from cache.
 
 ## Run
 
@@ -19,7 +17,9 @@ Open http://localhost:3000 and paste one of the seed posts:
 - https://x.com/0xCodez/status/2069736449902027136 — Loop Engineering, sorted as **paper**
 - https://x.com/cyrilXBT/status/2069651792678510894 — Karpathy's second brain, sorted as **idea**
 
-`npm run seed` loads those three fixtures into `data/saves.sqlite` through the same pipeline. It does not call the network. Pass `--live` to try a live fetch first.
+`npm run seed` loads those three fixtures into `data/saves.sqlite` through the same pipeline. It does not call the network. The Scrapling card replays a committed run (`fixtures/repo-runs/scrapling/`: stdout, screenshot, and JSON) so the detail page works offline. Pass `--live` to fetch the post from the network and actually clone and run the repo.
+
+`POST /api/saves/:id/rerun` (or **Run again** on the detail page) sorts the save again. Offline (`INGEST_OFFLINE=1` or `npm run seed`) replays the cache. A normal server run executes the repo.
 
 The card is saved as `queued` immediately. The page updates when ingest and sort finish.
 
@@ -47,4 +47,29 @@ SQLite table `saves`: url, author, text, created_at, kind, status (`queued`, `so
 
 `data/profile.json` is Srinikhil's profile for the later "why you" step. `why_you` stays empty for now.
 
-`src/act.js` is the act stage. Step 1 records a skip. The repo runner (temp dir, install, ~90s timeout, screenshot, cached replay) replaces `actOnRepo` next.
+`src/act.js` runs repos. Paper, idea, tool, and event actions are still stubs.
+
+## Repo runner
+
+For `kind=repo`, `actOnRepo` calls `runRepo({ saveId, repoUrl })` in `src/runner/`. It:
+
+1. Clones the GitHub repo into a fresh temp directory (no Docker).
+2. Detects Python or JavaScript and installs into a venv or local `node_modules`. Scrapling's README quickstart imports `scrapling.fetchers`, so the install includes that extra.
+3. Runs the README quickstart, or a generated script that scrapes https://quotes.toscrape.com.
+4. Kills the process tree if the run exceeds 90 seconds. Clone and install have separate ceilings.
+5. Builds a fresh allowlist for every child (`PATH`, `HOME` and `TMPDIR` set to the temp dir, `LANG`, plus pip/npm settings). `spawn` never receives `process.env` or a spread of it. A parent `OPENAI_API_KEY`, `*_KEY`, or `*_TOKEN` is not visible in the child. `test/runner.test.js` dumps the child environment and checks that.
+6. Writes a PNG of the terminal output (Chrome via Playwright) under `data/screenshots/` and stores stdout, the screenshot path, and `action_result_json` (repo, language, commands, exit code, duration, timestamp, extracted sample) on the save.
+
+Run one repo from the shell (needs `python3-venv`, network, and Chrome for the screenshot):
+
+```bash
+npm run run-repo -- https://github.com/D4Vinci/Scrapling
+```
+
+Regenerate the committed Scrapling cache after a real run:
+
+```bash
+npm run seed:scrapling
+```
+
+The detail page heading **Show last run** renders that cached screenshot and stdout with no further network.

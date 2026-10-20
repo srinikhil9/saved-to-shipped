@@ -42,7 +42,13 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   );
   assert.equal(done[0].status, "done");
   assert.equal(done[0].why_you, null);
-  assert.equal(done[0].action_result_json.act.status, "skipped");
+  assert.equal(done[0].error, null);
+  assert.equal(done[0].action_result_json.act.status, "cached");
+  assert.equal(done[0].action_result_json.act.repo, "https://github.com/D4Vinci/Scrapling");
+  assert.equal(done[0].screenshot_path, "/screenshots/scrapling-seed.png");
+  assert.ok(done[0].action_result_json.act.extracted_sample.length >= 1);
+  assert.equal(done[1].action_result_json.act.status, "skipped");
+  assert.equal(done[1].screenshot_path, null);
 
   const list = await fetch(`${base}/api/saves`).then((response) => response.json());
   assert.equal(list.length, 3);
@@ -66,7 +72,14 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   const detail = await fetch(`${base}/saves/${ids[0]}`);
   const detailHtml = await detail.text();
   assert.match(detailHtml, /Show last run/);
-  assert.match(detailHtml, /Repo runner lands in the next step/);
+  assert.match(detailHtml, /scrapling-seed\.png/);
+  assert.match(detailHtml, /id="stdout"/);
+  const quote = done[0].action_result_json.act.extracted_sample[0].slice(0, 24);
+  assert.match(detailHtml, new RegExp(quote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const shot = await fetch(`${base}${done[0].screenshot_path}`);
+  assert.equal(shot.status, 200);
+  const png = Buffer.from(await shot.arrayBuffer());
+  assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
 
   const missing = await fetch(`${base}/api/saves/99999`);
   assert.equal(missing.status, 404);

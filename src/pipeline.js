@@ -30,9 +30,11 @@ export async function runPipeline(db, id, options = {}) {
     });
 
     const current = getSave(db, id);
-    const action = await act({ ...current, details: sorted.details });
+    const action = await act({ ...current, details: sorted.details }, options);
+    const failed = action?.status === "failed";
     return updateSave(db, id, {
-      status: "done",
+      status: failed ? "failed" : "done",
+      screenshot_path: action?.screenshot_path || null,
       action_result_json: JSON.stringify({
         sorted: {
           source: sorted.source,
@@ -45,7 +47,7 @@ export async function runPipeline(db, id, options = {}) {
         },
         act: action,
       }),
-      error: null,
+      error: failed ? action?.error || "Repo run failed" : null,
     });
   } catch (error) {
     return updateSave(db, id, {

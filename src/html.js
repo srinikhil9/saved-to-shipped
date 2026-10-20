@@ -131,16 +131,35 @@ function renderCard(save) {
       <h2><a href="/saves/${save.id}">${escapeHtml(save.author || "Fetching post")}</a></h2>
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
+      ${save.screenshot_path ? `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">` : ""}
       ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
     </article>
   `;
 }
 
 function renderLastRun(save, act) {
-  if (save.screenshot_path) {
-    return `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">`;
+  const sample = Array.isArray(act?.extracted_sample) ? act.extracted_sample : [];
+  const parts = [];
+  if (act && (save.screenshot_path || act.stdout)) {
+    const bits = [
+      act.language || "",
+      act.exit_code == null ? "" : `exit ${act.exit_code}`,
+      act.smoke_source ? `${act.smoke_source} quickstart` : "",
+      act.timestamp || "",
+    ].filter(Boolean);
+    if (bits.length) parts.push(`<p class="repo">${escapeHtml(bits.join(" · "))}</p>`);
   }
-  const reason = act?.reason || "No cached run yet.";
+  if (sample.length) {
+    parts.push(`<ul class="sample">${sample.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`);
+  }
+  if (save.screenshot_path) {
+    parts.push(`<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">`);
+  }
+  if (act?.stdout) {
+    parts.push(`<h3>stdout</h3><pre class="post" id="stdout">${escapeHtml(act.stdout)}</pre>`);
+  }
+  if (parts.length) return parts.join("");
+  const reason = act?.reason || act?.error || "No cached run yet.";
   return `<p>${escapeHtml(reason)} When a run exists, this spot replays the cached stdout and screenshot without calling the network again.</p>`;
 }
 
@@ -261,7 +280,9 @@ function layout({ title, body, pending }) {
     .details dd { margin: 0; overflow-wrap: anywhere; }
     .last-run { padding: 14px; margin-top: 8px; }
     .error { color: var(--bad); }
-    .shot { max-width: 100%; border-radius: 12px; }
+    .shot { max-width: 100%; border-radius: 12px; margin-top: 10px; display: block; }
+    .sample { margin: 8px 0 4px; padding-left: 18px; }
+    .last-run h3 { margin: 14px 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
     @media (max-width: 640px) {
       h1 { font-size: 34px; }
       .row { flex-direction: column; }

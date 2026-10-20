@@ -1,16 +1,17 @@
+import { paths } from "./paths.js";
+import { loadCachedRepoRun } from "./runner/cache.js";
+import { runRepo } from "./runner/runRepo.js";
+
 /**
  * Act stage.
  *
- * Step 1 records the sort and stops. Step 2 replaces `actOnRepo`:
- * clone the repo into a temp directory, detect the language, install
- * into a local venv or node_modules, run the README quickstart or a
- * small smoke script, capture stdout plus a screenshot, and enforce a
- * timeout of about 90 seconds. Cache that result on the save
- * (action_result_json + screenshot_path) so the detail page can replay
- * "show last run" with no network.
+ * kind=repo clones the repo into a temp directory, installs into a venv
+ * or local node_modules, runs the README quickstart (or a generated scrape),
+ * and stores stdout plus a screenshot. Offline mode replays the committed
+ * fixture instead of cloning. Other kinds stay as stubs.
  */
-export async function act(save) {
-  if (save.kind === "repo") return actOnRepo(save);
+export async function act(save, options = {}) {
+  if (save.kind === "repo") return actOnRepo(save, options);
   if (save.kind === "paper" || save.kind === "idea") return actOnWriteup(save);
   if (save.kind === "tool") return actOnTool(save);
   if (save.kind === "event") return actOnEvent(save);
@@ -20,12 +21,40 @@ export async function act(save) {
   };
 }
 
-export async function actOnRepo(save) {
+export async function actOnRepo(save, options = {}) {
+  const repoUrl = save.details?.repo_url || null;
+  if (!repoUrl) {
+    return {
+      status: "failed",
+      error: "No GitHub repo URL on this save",
+      repo_url: null,
+    };
+  }
+
+  if (options.offline) {
+    const cached = loadCachedRepoRun(repoUrl, { screenshotDir: paths.screenshots });
+    if (cached) return cached;
+    return {
+      status: "failed",
+      error: `No cached run for ${repoUrl}`,
+      repo_url: repoUrl,
+    };
+  }
+
+  const result = await runRepo({
+    saveId: save.id,
+    repoUrl,
+    screenshotDir: paths.screenshots,
+    onLog: (line) => console.log(`[save ${save.id}] ${line}`),
+  });
+  const action = result.action_result_json || {};
   return {
-    status: "skipped",
-    reason:
-      "Repo runner lands in the next step: clone, install, and run in a temp dir with a 90s timeout, then cache stdout and a screenshot.",
-    repo_url: save.details?.repo_url || null,
+    ...action,
+    status: result.error ? "failed" : "ok",
+    error: result.error,
+    stdout: result.stdout,
+    screenshot_path: result.screenshot_path,
+    repo_url: repoUrl,
   };
 }
 

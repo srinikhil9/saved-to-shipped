@@ -10,10 +10,13 @@
   "scripts": {
     "start": "node src/index.js",
     "seed": "node scripts/seed.js",
-    "test": "node --test"
+    "test": "node --test",
+    "run-repo": "node scripts/run-repo.js",
+    "seed:scrapling": "node scripts/seed-scrapling.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "playwright-core": "^1.64.1"
   }
 }
