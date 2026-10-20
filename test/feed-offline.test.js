@@ -161,6 +161,24 @@ test("feed renders every seed offline with kind, verdict, and why_you", async (t
     assert.match(html, new RegExp(escapeRegExp(row.why_you)));
     assert.match(html, new RegExp(`<span class="badge ${row.kind}">`));
   }
+  const articles = [...html.matchAll(/<article class="card"[\s\S]*?<\/article>/g)].map((match) => match[0]);
+  const list = await fetch(`${base}/api/saves`).then((response) => response.json());
+  const restIds = list.map((row) => row.id).filter((id) => id !== scrapling.id);
+  const feedIds = articles.map((card) => Number(card.match(/\/saves\/(\d+)/)[1]));
+  assert.deepEqual(feedIds, [scrapling.id, ...restIds]);
+  assert.match(articles[0], /Works: installed and ran in 11\.3s \(scrape 0\.2s\)/);
+  assert.match(articles[0], /badge other">cached/);
+  const cuaCard = articles.find((card) => card.includes(`/saves/${cua.id}`));
+  assert.match(cuaCard, /README cached · live install skipped/);
+  assert.doesNotMatch(cuaCard, /badge other">cached/);
+  const fortressCard = articles.find((card) => card.includes(`/saves/${fortress.id}`));
+  assert.match(fortressCard, /badge tool/);
+  assert.match(fortressCard, /Try it: point scraping agents at stealth Chromium/);
+  assert.match(fortressCard, /stealth-browser infra/);
+  assert.doesNotMatch(fortressCard, /badge other">cached/);
+  const cardsHtml = await fetch(`${base}/feed/cards`).then((response) => response.text());
+  const cardIds = [...cardsHtml.matchAll(/<h2><a href="\/saves\/(\d+)">/g)].map((match) => Number(match[1]));
+  assert.deepEqual(cardIds, feedIds);
   assert.match(html, /Works: installed and ran in 11\.3s \(scrape 0\.2s\)/);
   assert.match(html, /loop-engineering\.zip/);
   assert.match(html, /second-brain\.zip/);
@@ -175,6 +193,7 @@ test("feed renders every seed offline with kind, verdict, and why_you", async (t
   const cuaPage = await fetch(`${base}/saves/${cua.id}`);
   const cuaHtml = await cuaPage.text();
   assert.match(cuaHtml, /README cached, live install skipped/);
+  assert.doesNotMatch(cuaHtml, /badge other">cached/);
   assert.doesNotMatch(cuaHtml, /last good run/);
   assert.doesNotMatch(cuaHtml, /2026-10-20T02:40:00/);
   assert.doesNotMatch(cuaHtml, /readme quickstart/);

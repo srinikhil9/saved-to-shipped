@@ -79,7 +79,23 @@ export function renderCards(saves) {
   if (!saves.length) {
     return `<p class="empty">No saves yet. Paste a post and a card will show up here.</p>`;
   }
-  return saves.map(renderCard).join("");
+  return feedOrder(saves).map(renderCard).join("");
+}
+
+/** Repos with a finished install-and-run lead the feed. Everything else keeps its order. */
+function feedOrder(saves) {
+  const ranked = saves.map((save, index) => ({ save, index, lead: ranForReal(save) ? 0 : 1 }));
+  ranked.sort((a, b) => a.lead - b.lead || a.index - b.index);
+  return ranked.map((item) => item.save);
+}
+
+function ranForReal(save) {
+  if (save?.kind !== "repo") return false;
+  const act = parseAction(save)?.act;
+  if (!act || isReadmeOnlyCache(act)) return false;
+  if (Number(act.exit_code) !== 0) return false;
+  const ms = act.duration_ms ?? act.run_duration_ms;
+  return ms != null && Number.isFinite(Number(ms)) && Number(ms) >= 0;
 }
 
 export function renderNotFound() {
@@ -293,7 +309,7 @@ function renderCard(save) {
 function cardNotes(act) {
   if (!act) return "";
   const bits = [];
-  if (act.status === "cached") bits.push(`<span class="badge other">cached</span>`);
+  if (act.status === "cached" && !isReadmeOnlyCache(act)) bits.push(`<span class="badge other">cached</span>`);
   if (act.attempt_error) {
     if (act.fallback_note) bits.push(`<p class="note">${escapeHtml(act.fallback_note)}</p>`);
     bits.push(`<p class="error">${escapeHtml(clip(act.attempt_error))}</p>`);
@@ -364,7 +380,7 @@ function renderLastRun(save, act, options = {}) {
   const sample = Array.isArray(act?.extracted_sample) ? act.extracted_sample : [];
   const readmeOnly = isReadmeOnlyCache(act);
   const parts = [];
-  if (act?.status === "cached") parts.push(`<p class="badge other">cached</p>`);
+  if (act?.status === "cached" && !readmeOnly) parts.push(`<p class="badge other">cached</p>`);
   if (readmeOnly) parts.push(`<p class="repo">${escapeHtml(README_ONLY_NOTE)}</p>`);
   else if (act?.fallback_note) parts.push(`<p class="repo">${escapeHtml(act.fallback_note)}</p>`);
   if (act?.warning) parts.push(`<p class="repo">${escapeHtml(act.warning)}</p>`);

@@ -115,7 +115,9 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   assert.equal(idea.action_result_json.act.files.includes("INSTRUCTIONS.md"), true);
   assert.match(html, /\/artifacts\/2069736449902027136\/loop-engineering\.zip/);
   assert.match(html, /\/artifacts\/2069651792678510894\/second-brain\.zip/);
-  assert.doesNotMatch(html, /data-kind="repo"[\s\S]*Download starter/);
+  const repoCard = html.slice(html.indexOf('data-kind="repo"'), html.indexOf("</article>"));
+  assert.doesNotMatch(repoCard, /Download starter/);
+  assert.match(html, /data-kind="repo"[\s\S]*data-kind="idea"/);
 
   const paperPage = await fetch(`${base}/saves/${ids[1]}`);
   const paperHtml = await paperPage.text();
