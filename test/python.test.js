@@ -23,6 +23,13 @@ import {
   versionSatisfies,
 } from "../src/runner/python.js";
 
+const savedIngestOffline = process.env.INGEST_OFFLINE;
+delete process.env.INGEST_OFFLINE;
+process.on("exit", () => {
+  if (savedIngestOffline === undefined) delete process.env.INGEST_OFFLINE;
+  else process.env.INGEST_OFFLINE = savedIngestOffline;
+});
+
 const SCRAPLING_TOML = `[project]
 name = "scrapling"
 requires-python = ">=3.10"

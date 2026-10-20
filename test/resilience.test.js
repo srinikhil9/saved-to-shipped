@@ -11,6 +11,13 @@ import { renderDetail } from "../src/html.js";
 import { ingest, READ_FAILED } from "../src/ingest.js";
 import { runPipeline } from "../src/pipeline.js";
 
+const savedIngestOffline = process.env.INGEST_OFFLINE;
+delete process.env.INGEST_OFFLINE;
+process.on("exit", () => {
+  if (savedIngestOffline === undefined) delete process.env.INGEST_OFFLINE;
+  else process.env.INGEST_OFFLINE = savedIngestOffline;
+});
+
 const JACK = "https://x.com/jack/status/20";
 
 test("a successful live read is cached and replays offline", async () => {

@@ -76,15 +76,31 @@ async function requestSpec(options) {
 }
 
 async function postSpec({ apiKey, baseUrl, model, fetchImpl, timeoutMs, save, profileName }, reasoning) {
-  return fetchImpl(`${String(baseUrl).replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json",
+  const timeout = referencedTimeout(timeoutMs ?? SPEC_TIMEOUT_MS);
+  try {
+    return await fetchImpl(`${String(baseUrl).replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(specBody(model, save, profileName, reasoning)),
+      signal: timeout.signal,
+    });
+  } finally {
+    timeout.cancel();
+  }
+}
+
+function referencedTimeout(ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    cancel() {
+      clearTimeout(timer);
     },
-    body: JSON.stringify(specBody(model, save, profileName, reasoning)),
-    signal: AbortSignal.timeout(timeoutMs ?? SPEC_TIMEOUT_MS),
-  });
+  };
 }
 
 async function readSpec(response) {

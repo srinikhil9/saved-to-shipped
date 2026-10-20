@@ -129,9 +129,9 @@ export function renderDetail(save) {
 }
 
 function renderRepoDetail(save, action, details, links, act, products) {
-  const seconds = formatRunSeconds(act.duration_ms);
-  const works = seconds ? `Works: installed and ran in ${seconds} (Python 3.10+)` : "Works: installed and ran (Python 3.10+)";
+  const works = verdictLine(act);
   const snippet = String(act.snippet || "").replace(/\s+$/, "");
+  const next = nextStep(act, details);
   return `
       <p class="back"><a href="/">← Feed</a></p>
       <article class="detail lead">
@@ -144,10 +144,11 @@ function renderRepoDetail(save, action, details, links, act, products) {
           <p class="works">${escapeHtml(works)}</p>
           ${save.why_you ? `<p class="why"><span class="k">Why you</span> ${escapeHtml(save.why_you)}</p>` : ""}
           ${snippet ? `<pre class="snippet">${escapeHtml(snippet)}</pre>` : ""}
-          <p class="next"><span class="k">Next step</span> Drop this into your ingestion job</p>
+          <p class="next"><span class="k">Next step</span> ${escapeHtml(next)}</p>
         </section>
         <p class="run-label">Show last run</p>
         ${renderProductTable(products)}
+        ${save.screenshot_path ? `<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">` : ""}
         <details class="more">
           <summary>Details</summary>
           ${save.summary ? `<p class="summary">${escapeHtml(save.summary)}</p>` : ""}
@@ -165,11 +166,11 @@ function renderRepoDetail(save, action, details, links, act, products) {
           </dl>
           ${renderLinks(links)}
           <div class="last-run">
-            ${renderLastRun(save, act)}
+            ${renderLastRun(save, act, { screenshot: false })}
           </div>
         </details>
         ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
-        ${save.why_you_source === "pending" ? `<script>setTimeout(() => location.reload(), 800)</script>` : ""}
+        ${needsRefresh(save) ? `<script>setTimeout(function () { location.reload(); }, 800);</script>` : ""}
         <form method="post" action="/api/saves/${save.id}/rerun">
           <button type="submit">Run again</button>
         </form>
@@ -214,6 +215,45 @@ function formatRunSeconds(ms) {
   return `${(n / 1000).toFixed(1)}s`;
 }
 
+function verdictLine(act) {
+  const wall = formatRunSeconds(act?.duration_ms);
+  const scrape = formatRunSeconds(act?.run_duration_ms);
+  if (act?.timed_out === true) {
+    return `Timed out after ${wall || scrape || "the budget"}`;
+  }
+  if (act?.exit_code !== 0) {
+    if (act?.exit_code == null) return "No finished run";
+    return installFailed(act) ? "Failed at install" : "Failed";
+  }
+  const runtime = act?.python ? ` (Python ${act.python})` : "";
+  return `Works: ${timingClause(wall, scrape)}${runtime}`;
+}
+
+function timingClause(wall, scrape) {
+  if (wall && scrape && wall !== scrape) return `installed and ran in ${wall} (scrape ${scrape})`;
+  if (wall) return `installed and ran in ${wall}`;
+  if (scrape) return `installed and ran (scrape ${scrape})`;
+  return "installed and ran";
+}
+
+function installFailed(act) {
+  if (act?.install_stderr) return true;
+  const commands = Array.isArray(act?.commands) ? act.commands : [];
+  return commands.some((command) => {
+    const cmd = String(command?.cmd || "");
+    return command?.exit_code && /pip |npm |pnpm |yarn |venv|install/.test(cmd);
+  });
+}
+
+function nextStep(act, details) {
+  const repoUrl = act?.repo || details?.repo_url || "";
+  const name = String(repoUrl).split("/").filter(Boolean).pop()?.replace(/\.git$/, "") || "";
+  if (act?.snippet && name) return `Run the snippet above in ${name}`;
+  if (act?.snippet) return "Run the snippet from this save";
+  if (name) return `Clone ${name} and try its quickstart`;
+  return "Try the quickstart from this save";
+}
+
 function renderCard(save) {
   const action = parseAction(save);
   const repo = action?.sorted?.details?.repo_url;
@@ -239,7 +279,7 @@ function renderCard(save) {
   `;
 }
 
-function renderLastRun(save, act) {
+function renderLastRun(save, act, options = {}) {
   if (act?.zipUrl) {
     return `
       <p>${escapeHtml(act.summary || "Spec and starter are ready.")}</p>
@@ -270,7 +310,7 @@ function renderLastRun(save, act) {
   if (sample.length) {
     parts.push(`<ul class="sample">${sample.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`);
   }
-  if (save.screenshot_path) {
+  if (save.screenshot_path && options.screenshot !== false) {
     parts.push(`<img class="shot" alt="Last run screenshot" src="${escapeHtml(save.screenshot_path)}">`);
   }
   if (act?.stdout) {
