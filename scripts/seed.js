@@ -2,13 +2,13 @@ import { createSave, findSaveByUrl, getSave, openDb } from "../src/db.js";
 import { llmSettings, sanitizedEnv } from "../src/env.js";
 import { listFixturePosts } from "../src/ingest.js";
 import { paths } from "../src/paths.js";
-import { loadProfile } from "../src/profile.js";
+import { resolveProfile } from "../src/profile.js";
 import { runPipeline } from "../src/pipeline.js";
 import { backfillWhyYou } from "../src/why.js";
 
 const offline = !process.argv.includes("--live");
 const db = openDb(process.env.DB_PATH || paths.db);
-const profile = loadProfile();
+const profile = resolveProfile(db).profile;
 const posts = listFixturePosts();
 
 if (!posts.length) {

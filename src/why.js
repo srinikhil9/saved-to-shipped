@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getSave, updateSave } from "./db.js";
 import { llmSettings } from "./env.js";
+import { cleanPhrase, loadProfile } from "./profile.js";
 
 const KINDS = new Set(["repo", "tool", "paper", "idea", "event", "other"]);
 const DEFAULT_TIMEOUT_MS = 8000;
@@ -27,10 +28,34 @@ const tickets = new WeakMap();
 export function whyYou(save, profile = {}) {
   const kind = KINDS.has(save?.kind) ? save.kind : "other";
   const blob = `${save?.text || ""}\n${save?.summary || ""}`;
-  const slots = { ...DEFAULT_SLOTS, ...(profile.why || {}) };
-  const hit = keywordLine(kind, blob, slots);
+  // The three seed lines always use the file's short phrases, never a pushed list or sentence.
+  const hit = keywordLine(kind, blob, seedSlots());
   if (hit) return hit;
+  const slots = { ...seedSlots(), ...cleanWhy(profile.why) };
   return template(kind, slots.focus || FOCUS);
+}
+
+function seedSlots() {
+  const slots = { ...DEFAULT_SLOTS };
+  try {
+    const file = loadProfile();
+    for (const [key, value] of Object.entries(file?.why || {})) {
+      if (typeof value === "string" && value.trim()) slots[key] = value.trim();
+    }
+  } catch {
+    // DEFAULT_SLOTS already match the shipped profile.
+  }
+  return slots;
+}
+
+function cleanWhy(why) {
+  if (!why || typeof why !== "object") return {};
+  const clean = {};
+  for (const [key, value] of Object.entries(why)) {
+    const phrase = cleanPhrase(value);
+    if (phrase) clean[key] = phrase;
+  }
+  return clean;
 }
 
 export function profileHash(profile = {}) {
@@ -53,6 +78,33 @@ export function cachedWhyYou(row, profile, save = row) {
   if (!row?.why_you || row.why_you_source !== "grok") return null;
   if (row.why_you_profile_hash !== whyCacheKey(profile, save)) return null;
   return row.why_you;
+}
+
+/**
+ * Rewrite template lines after a profile push or reset.
+ * Grok-written lines stay as they are.
+ */
+export function retargetWhyYou(db, profile) {
+  const rows = db.prepare("SELECT * FROM saves WHERE kind IS NOT NULL AND why_you_source IS NOT 'grok'").all();
+  if (!rows.length) return 0;
+  const update = db.prepare(
+    `UPDATE saves
+     SET why_you = @why_you, why_you_source = 'template', why_you_profile_hash = @hash
+     WHERE id = @id AND why_you_source IS NOT 'grok'`,
+  );
+  let count = 0;
+  const write = db.transaction((pending) => {
+    for (const row of pending) {
+      if (row.why_you_source === "grok") continue;
+      const hash = whyCacheKey(profile, row);
+      const line = whyYou(row, profile);
+      if (row.why_you === line && row.why_you_source === "template" && row.why_you_profile_hash === hash) continue;
+      update.run({ id: row.id, why_you: line, hash });
+      count += 1;
+    }
+  });
+  write(rows);
+  return count;
 }
 
 export function backfillWhyYou(db, profile) {
