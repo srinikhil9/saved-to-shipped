@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/index.js",
     "seed": "node scripts/seed.js",
+    "relate:demo": "node scripts/relate-demo.js",
     "test": "node --test"
   },
   "dependencies": {

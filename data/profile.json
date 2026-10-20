@@ -2,5 +2,29 @@
   "name": "Srinikhil",
   "summary": "Srinikhil is building a startup that scrapes users' social media data to recommend niche consumer products from YC / a16z startups.",
   "building": "a startup that scrapes users' social media data to recommend niche consumer products from YC / a16z startups",
-  "used_for": "The relevance step writes why_you from this profile. Step 1 stores it and does not call that step yet."
+  "interests": [
+    "scraping",
+    "social data",
+    "recommendations",
+    "consumer products",
+    "YC",
+    "a16z",
+    "agents",
+    "data pipelines"
+  ],
+  "keywords": [
+    "scraping",
+    "scrape",
+    "social data",
+    "social media",
+    "recommendations",
+    "consumer products",
+    "YC",
+    "a16z",
+    "agents",
+    "data pipelines",
+    "founders",
+    "user signals"
+  ],
+  "used_for": "src/relate.js reads this profile and writes saves.why_you. Interests and keywords are optional overlap hints; summary and building still work alone."
 }

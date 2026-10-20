@@ -12,7 +12,7 @@ const SEEDS = [
 
 test("API and HTML feed sort pasted seed URLs", async (t) => {
   const db = openDb(":memory:");
-  const app = createApp(db, { offline: true, env: {} });
+  const app = createApp(db, { offline: true, env: {}, relateCache: false });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -41,7 +41,10 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
     "https://drive.google.com/file/d/1qzKI4DKnyHRpXK1J3ATPqwaqLc0iNu-M/view?usp=sharing",
   );
   assert.equal(done[0].status, "done");
-  assert.equal(done[0].why_you, null);
+  assert.match(done[0].why_you, /drop-in for the scraping pipeline/);
+  assert.match(done[1].why_you, /agent and scrape loops/);
+  assert.match(done[1].why_you, /Saved to Shipped is itself one of those loops/);
+  assert.match(done[2].why_you, /knowledge base of products, founders, and user signals/);
   assert.equal(done[0].action_result_json.act.status, "skipped");
 
   const list = await fetch(`${base}/api/saves`).then((response) => response.json());
@@ -67,6 +70,8 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
   const detailHtml = await detail.text();
   assert.match(detailHtml, /Show last run/);
   assert.match(detailHtml, /Repo runner lands in the next step/);
+  assert.match(detailHtml, /Why you/);
+  assert.match(detailHtml, /drop-in for the scraping pipeline/);
 
   const missing = await fetch(`${base}/api/saves/99999`);
   assert.equal(missing.status, 404);
@@ -85,10 +90,13 @@ test("API and HTML feed sort pasted seed URLs", async (t) => {
     headers: { "content-type": "application/json", accept: "application/json" },
   });
   assert.equal(rerun.status, 200);
-  assert.equal((await rerun.json()).status, "queued");
+  const rerunBody = await rerun.json();
+  assert.equal(rerunBody.status, "queued");
+  assert.equal(rerunBody.why_you, null);
   const again = await waitUntilSettled(base, ids[0]);
   assert.equal(again.status, "done");
   assert.equal(again.kind, "repo");
+  assert.match(again.why_you, /drop-in for the scraping pipeline/);
 
   const missingRerun = await fetch(`${base}/api/saves/99999/rerun`, {
     method: "POST",

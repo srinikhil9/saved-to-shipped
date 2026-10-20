@@ -2,11 +2,13 @@ import { act } from "./act.js";
 import { classify } from "./classify.js";
 import { getSave, updateSave } from "./db.js";
 import { combinedText, ingest } from "./ingest.js";
+import { loadProfile } from "./profile.js";
+import { relateAndStore } from "./relate.js";
 
 /**
- * Stages for one save: ingest → sort → act.
- * Relate (why_you, from data/profile.json) is a later step and stays null.
- * Show reads whatever this pipeline stored.
+ * Stages for one save: ingest → sort → relate → act.
+ * Relate writes saves.why_you from data/profile.json (Grok when XAI_API_KEY
+ * is set, otherwise the keyword fallback). Show reads whatever this stored.
  */
 export async function runPipeline(db, id, options = {}) {
   const existing = getSave(db, id);
@@ -30,6 +32,27 @@ export async function runPipeline(db, id, options = {}) {
     });
 
     const current = getSave(db, id);
+    const profile = options.profile || loadProfile(options.profilePath);
+    await relateAndStore(
+      db,
+      {
+        id: current.id,
+        url: current.url,
+        author: current.author,
+        text: combinedText(post),
+        kind: sorted.kind,
+        summary: sorted.summary,
+      },
+      profile,
+      {
+        env: options.env,
+        fetchImpl: options.llmFetch,
+        cachePath: options.relateCachePath,
+        cache: options.relateCache,
+        timeoutMs: options.relateTimeoutMs,
+      },
+    );
+
     const action = await act({ ...current, details: sorted.details });
     return updateSave(db, id, {
       status: "done",

@@ -59,6 +59,7 @@ export function createApp(db, options = {}) {
       status: "queued",
       kind: null,
       summary: null,
+      why_you: null,
       error: null,
       action_result_json: null,
       screenshot_path: null,

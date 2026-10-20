@@ -22,6 +22,7 @@ for (const post of posts) {
   await runPipeline(db, row.id, { offline });
   const done = getSave(db, row.id);
   console.log(`#${done.id} ${done.status} ${done.kind || "-"} ${done.author || ""} ${post.url}`);
+  if (done.why_you) console.log(`  why you: ${done.why_you}`);
   if (done.error) console.log(`  error: ${done.error}`);
 }
 
