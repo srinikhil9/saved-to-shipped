@@ -122,6 +122,12 @@ test("verdict follows the run status instead of always saying Works", () => {
   assert.doesNotMatch(other, /Python 3\.10\+/);
   assert.doesNotMatch(other, /ingestion job/);
   assert.doesNotMatch(other, /Scrapling/);
+
+  const unfinished = renderDetail(repoSave({ duration_ms: 1, snippet: "print(1)\n", stdout: "x" }));
+  assert.match(unfinished, /No finished run/);
+  assert.match(unfinished, /class="verdict none"/);
+  assert.match(unfinished, /\.verdict\.none \.line \{ color: var\(--muted\)/);
+  assert.doesNotMatch(unfinished, /class="verdict failed"/);
 });
 
 test("a fallback to the last good run says so in the visible verdict", () => {
@@ -143,9 +149,19 @@ test("a fallback to the last good run says so in the visible verdict", () => {
   );
   const detailsAt = html.indexOf("<details");
   const verdict = html.slice(html.lastIndexOf("<section", html.indexOf('id="verdict"')), detailsAt);
-  assert.match(verdict, new RegExp(`Works \\(last good run, ${escapeRegExp(when)}\\); latest run failed`));
+  assert.match(
+    verdict,
+    new RegExp(`Works \\(last good run, <time datetime="${escapeRegExp(when)}"><\\/time>\\); latest run failed`),
+  );
+  assert.doesNotMatch(verdict.replace(/datetime="[^"]*"/g, ""), new RegExp(escapeRegExp(when)));
   assert.match(verdict, /class="verdict works"/);
   assert.doesNotMatch(verdict, /Works: installed and ran/);
+  assert.match(html, /#verdict time\[datetime\]/);
+  assert.match(html, /month: "short"/);
+  assert.match(html, /day: "numeric"/);
+  assert.match(html, /hour: "numeric"/);
+  assert.match(html, /minute: "2-digit"/);
+  assert.doesNotMatch(html.slice(html.indexOf("<script>"), html.indexOf("</script>", html.indexOf("#verdict time"))), /year:/);
   assert.match(html.slice(detailsAt), /showing last good run from/);
 });
 
