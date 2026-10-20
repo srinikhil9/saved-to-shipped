@@ -4,7 +4,6 @@ export function renderFeed(saves) {
   const pending = saves.some((save) => isPending(save.status));
   return layout({
     title: "Saved to Shipped",
-    pending,
     body: `
       <header class="top">
         <div>
@@ -70,7 +69,6 @@ export function renderCards(saves) {
 export function renderNotFound() {
   return layout({
     title: "Not found · Saved to Shipped",
-    pending: false,
     body: `<p class="back"><a href="/">← Feed</a></p><h1>That save does not exist.</h1>`,
   });
 }
@@ -82,7 +80,6 @@ export function renderDetail(save) {
   const act = action?.act;
   return layout({
     title: save.author ? `${save.author} · Saved to Shipped` : "Save · Saved to Shipped",
-    pending: isPending(save.status),
     body: `
       <p class="back"><a href="/">← Feed</a></p>
       <article class="detail">
@@ -128,7 +125,7 @@ function renderCard(save) {
         ${save.kind ? badge(save.kind) : `<span class="badge other">Unsorted</span>`}
         ${statusPill(save.status)}
       </div>
-      <h2><a href="/saves/${save.id}">${escapeHtml(save.author || "Fetching post")}</a></h2>
+      <h2><a href="/saves/${save.id}">${escapeHtml(cardTitle(save))}</a></h2>
       <p>${escapeHtml(save.summary || excerpt(save.text) || save.url)}</p>
       ${repo ? `<p class="repo"><a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a></p>` : ""}
       ${save.error ? `<p class="error">${escapeHtml(save.error)}</p>` : ""}
@@ -161,14 +158,19 @@ function renderLinks(links) {
   `;
 }
 
-function layout({ title, body, pending }) {
+function cardTitle(save) {
+  if (save.author) return save.author;
+  if (save.status === "failed") return "Couldn't read this post";
+  return "Fetching post";
+}
+
+function layout({ title, body }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
-  ${pending ? `<meta http-equiv="refresh" content="2">` : ""}
   <style>
     :root {
       color-scheme: light;

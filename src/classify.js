@@ -1,3 +1,5 @@
+import { llmSettings } from "./env.js";
+
 const KINDS = new Set(["repo", "tool", "paper", "idea", "event", "other"]);
 const RESERVED_GITHUB = new Set([
   "features",
@@ -25,14 +27,13 @@ const DATE_RE =
 
 export async function classify(input, options = {}) {
   const heuristic = classifyHeuristic(input);
-  const env = options.env || process.env;
-  const apiKey = env.LLM_API_KEY;
-  if (!apiKey) return heuristic;
+  const llmConfig = options.llm || llmSettings(options.env || process.env);
+  if (!llmConfig.apiKey) return heuristic;
   try {
     const llm = await classifyWithLlm(input, {
-      apiKey,
-      baseUrl: env.LLM_BASE_URL || "https://api.openai.com/v1",
-      model: env.LLM_MODEL || "gpt-4o-mini",
+      apiKey: llmConfig.apiKey,
+      baseUrl: llmConfig.baseUrl,
+      model: llmConfig.model,
       fetchImpl: options.fetchImpl || globalThis.fetch,
     });
     if (!llm) return heuristic;

@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expandPostLinks } from "./expand.js";
+import { REQUEST_TIMEOUT_MS } from "./limits.js";
 import { paths } from "./paths.js";
 import { isTco, parseXStatusUrl } from "./xurl.js";
 
 const UA = "SavedToShipped/0.1 (+https://github.com/srinikhil9/saved-to-shipped)";
+export const READ_FAILED = "Couldn't read this post. Check the link or your connection.";
 
 export function loadFixture(statusId, fixturesDir = paths.fixtures) {
   const file = path.join(fixturesDir, `${statusId}.json`);
@@ -22,11 +24,47 @@ export function listFixturePosts(fixturesDir = paths.fixtures) {
     .filter(Boolean);
 }
 
+export function readCachedPost(statusId, cacheDir = paths.liveCache) {
+  const file = path.join(cacheDir, `${statusId}.json`);
+  if (!fs.existsSync(file)) return null;
+  try {
+    return normalizeFixture(JSON.parse(fs.readFileSync(file, "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedPost(post, cacheDir = paths.liveCache) {
+  if (!post?.id) return;
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const body = {
+    id: String(post.id),
+    url: post.url,
+    author: post.author || null,
+    handle: post.handle || null,
+    posted_at: post.posted_at || null,
+    text: post.text || "",
+    links: post.links || [],
+    replies: post.replies || [],
+    quote: post.quote || null,
+    source: "live-cache",
+  };
+  fs.writeFileSync(path.join(cacheDir, `${post.id}.json`), JSON.stringify(body, null, 2));
+}
+
+/** A previous live read, or a committed seed fixture. */
+export function readSavedPost(input, options = {}) {
+  const parsed = parseXStatusUrl(typeof input === "string" ? input : input?.url);
+  if (!parsed) return null;
+  return readCachedPost(parsed.id, options.cacheDir) || loadFixture(parsed.id, options.fixturesDir);
+}
+
 /**
  * Fetch a public X post.
  * Live order (no API key): fxtwitter full text, then syndication, then oEmbed.
  * Author self-replies are included so "link in first comment" posts keep their URL.
- * Any failure, or a missing link that a fixture already has, falls back to fixtures/.
+ * A saved copy (live cache, then fixtures/) is used when the network fails.
+ * skipSaved forces a live read so a background refresh can update that copy.
  */
 export async function ingest(input, options = {}) {
   const parsed = parseXStatusUrl(input);
@@ -34,30 +72,26 @@ export async function ingest(input, options = {}) {
     throw new Error("Paste a public X post URL, like https://x.com/user/status/123");
   }
   const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const offline = options.offline === true;
 
-  if (offline) {
-    const fixture = loadFixture(parsed.id, options.fixturesDir);
-    if (!fixture) throw new Error(`No fixture for status ${parsed.id}`);
-    return expandPostLinks(fixture, fetchImpl);
+  if (options.offline) {
+    const saved = readSavedPost(parsed.url, options);
+    if (!saved) throw new Error(READ_FAILED);
+    return expandPostLinks(saved, fetchImpl);
   }
 
-  let live = null;
-  let liveError = null;
   try {
-    live = await fetchLive(parsed, fetchImpl);
+    let live = await fetchLive(parsed, fetchImpl);
     live = await expandPostLinks(live, fetchImpl);
-  } catch (error) {
-    liveError = error;
+    const fixture = loadFixture(parsed.id, options.fixturesDir);
+    if (fixture) live = mergeFixture(live, fixture);
+    writeCachedPost(live, options.cacheDir);
+    return live;
+  } catch {
+    if (options.skipSaved) throw new Error(READ_FAILED);
+    const saved = readSavedPost(parsed.url, options);
+    if (saved) return expandPostLinks(saved, fetchImpl);
+    throw new Error(READ_FAILED);
   }
-
-  const fixture = loadFixture(parsed.id, options.fixturesDir);
-  if (!live) {
-    if (fixture) return expandPostLinks(fixture, fetchImpl);
-    throw liveError || new Error(`Could not read ${parsed.url}`);
-  }
-  if (fixture) live = mergeFixture(live, fixture);
-  return live;
 }
 
 export function combinedText(post) {
@@ -65,30 +99,27 @@ export function combinedText(post) {
 }
 
 async function fetchLive(parsed, fetchImpl) {
-  const errors = [];
   let post = null;
   try {
     post = fromFx(await fetchJson(fetchImpl, `https://api.fxtwitter.com/status/${parsed.id}`));
-  } catch (error) {
-    errors.push(error);
+  } catch {
+    post = null;
   }
   if (!post?.text) {
     try {
       post = fromSyndication(await fetchJson(fetchImpl, `https://cdn.syndication.twimg.com/tweet-result?id=${parsed.id}&lang=en&token=x`), parsed);
-    } catch (error) {
-      errors.push(error);
+    } catch {
+      post = null;
     }
   }
   if (!post?.text) {
     try {
       post = fromOembed(await fetchJson(fetchImpl, `https://publish.twitter.com/oembed?omit_script=true&url=${encodeURIComponent(parsed.url)}`), parsed);
-    } catch (error) {
-      errors.push(error);
+    } catch {
+      post = null;
     }
   }
-  if (!post?.text) {
-    throw new Error(errors.map((error) => error.message).join("; ") || "empty post");
-  }
+  if (!post?.text) throw new Error(READ_FAILED);
   post.handle = post.handle || parsed.handle;
   post.url = parsed.url;
   post.id = parsed.id;
@@ -102,7 +133,7 @@ async function fetchAuthorReplies(parsed, handle, fetchImpl) {
     const response = await fetchImpl(parsed.url, {
       headers: { "user-agent": UA, accept: "text/html" },
       redirect: "follow",
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) return [];
     html = await response.text();
@@ -112,7 +143,7 @@ async function fetchAuthorReplies(parsed, handle, fetchImpl) {
   const ids = [...html.matchAll(/\/status\/(\d+)/g)]
     .map((match) => match[1])
     .filter((id, index, all) => id !== parsed.id && all.indexOf(id) === index)
-    .slice(0, 6);
+    .slice(0, 3);
   const replies = [];
   for (const id of ids) {
     try {
@@ -131,7 +162,7 @@ async function fetchJson(fetchImpl, url) {
   const response = await fetchImpl(url, {
     headers: { "user-agent": UA, accept: "application/json" },
     redirect: "follow",
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`${new URL(url).hostname} returned ${response.status}`);
   return response.json();

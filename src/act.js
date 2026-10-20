@@ -8,9 +8,12 @@
  * timeout of about 90 seconds. Cache that result on the save
  * (action_result_json + screenshot_path) so the detail page can replay
  * "show last run" with no network.
+ *
+ * `env` is the sanitized child environment from sanitizedEnv(). Step 2
+ * passes that object to the install and run processes. It has no API keys.
  */
-export async function act(save) {
-  if (save.kind === "repo") return actOnRepo(save);
+export async function act(save, { env } = {}) {
+  if (save.kind === "repo") return actOnRepo(save, env);
   if (save.kind === "paper" || save.kind === "idea") return actOnWriteup(save);
   if (save.kind === "tool") return actOnTool(save);
   if (save.kind === "event") return actOnEvent(save);
@@ -20,7 +23,7 @@ export async function act(save) {
   };
 }
 
-export async function actOnRepo(save) {
+export async function actOnRepo(save, _env = {}) {
   return {
     status: "skipped",
     reason:

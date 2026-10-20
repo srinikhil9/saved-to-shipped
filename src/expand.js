@@ -1,3 +1,4 @@
+import { REQUEST_TIMEOUT_MS } from "./limits.js";
 import { isHttpUrl, isTco } from "./xurl.js";
 
 const TCO_RE = /https?:\/\/t\.co\/[A-Za-z0-9]+/g;
@@ -9,7 +10,7 @@ export async function expandTcoUrl(shortUrl, fetchImpl = globalThis.fetch) {
     method: "GET",
     redirect: "follow",
     headers: { "user-agent": UA, accept: "text/html" },
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const finalUrl = response?.url;
   if (finalUrl && isHttpUrl(finalUrl) && !isTco(finalUrl) && !isBlockedHost(finalUrl)) return finalUrl;
