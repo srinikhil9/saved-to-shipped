@@ -25,6 +25,8 @@ export function createApp(db, options = {}) {
     llmFetch: options.llmFetch,
     whyFetch: options.whyFetch,
     whyTimeoutMs: options.whyTimeoutMs,
+    awaitSpec: options.awaitSpec === true,
+    specTimeoutMs: options.specTimeoutMs,
     profile,
     runRepo: options.runRepo,
     demoBudgetMs: options.demoBudgetMs,

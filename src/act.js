@@ -15,10 +15,9 @@ import { runRepo } from "./runner/runRepo.js";
  * not process.env. A missed screenshot is a warning. A failed or over-budget
  * live run keeps the row's own last good run. The committed fixture is only
  * used when that row has none.
- * kind=paper and kind=idea write a one-page SPEC.md and a starter zip under
- * data/artifacts/<status id>/. `options.force` rebuilds that directory.
- * `options.llm` (from llmSettings in src/env.js) drafts the spec with Grok.
- * No key, or any model error, keeps the template.
+ * kind=paper and kind=idea replay a committed starter under data/artifacts/,
+ * or write a new one under data/artifacts-runtime/. The template zip is ready
+ * before Grok runs. `options.llm` may replace SPEC.md in the background.
  */
 export async function act(save, options = {}) {
   if (save.kind === "repo") return actOnRepo(save, options);

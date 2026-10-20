@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
+import { getSave, updateSave } from "../db.js";
 import { llmSettings } from "../env.js";
 import { draftSpec } from "./llm.js";
 import { paths } from "../paths.js";
@@ -26,44 +27,123 @@ const DEFAULT_PROFILE = {
 export async function writeStarter(save, options, plan) {
   const profile = options.profile || loadProfileSafe();
   const key = artifactKey(save);
-  const dir = options.outDir ? path.resolve(options.outDir) : path.join(paths.artifacts, key);
   const stamp = profileStamp(profile);
-  const manifestPath = path.join(dir, "manifest.json");
+  const { read, write } = cacheDirs(key, options);
 
   if (!options.force) {
-    const cached = readCache(dir, manifestPath, stamp);
-    if (cached) return toResult(dir, key, cached, true);
+    for (const dir of read) {
+      const cached = readCache(dir, stamp);
+      if (cached) return toResult(dir, key, cached, true);
+    }
   }
 
   const templateSpec = ensureTrailingNewline(plan.spec(save, profile));
   const templateSummary = clipSummary(plan.summary(save, profile));
-  let specMarkdown = templateSpec;
-  let summary = templateSummary;
-  let source = "template";
+  const files = [{ path: "SPEC.md", contents: templateSpec }, ...plan.files(save, profile).map(normalizeFile)];
+  assertFiles(files);
+  const generation = crypto.randomBytes(8).toString("hex");
+  const manifest = writeTree(write, {
+    generator: GENERATOR,
+    profileHash: stamp,
+    generation,
+    type: plan.type,
+    status: "done",
+    source: "template",
+    summary: templateSummary,
+    zipName: plan.zipName,
+    files: files.map((file) => file.path),
+  }, files);
+  const result = toResult(write, key, manifest, false);
 
   const settings = options.llm || llmSettings(options.env);
-  if (settings.apiKey) {
-    try {
-      const drafted = await draftSpec({
-        llm: settings,
-        fetchImpl: options.fetchImpl || options.llmFetch || globalThis.fetch,
-        profileName: profile.name,
+  if (!settings.apiKey) return result;
+
+  let pending = null;
+  const upgrade = () => {
+    if (!pending) {
+      pending = refineSpec({
         save,
-        fallbackSummary: templateSummary,
-      });
-      specMarkdown = ensureTrailingNewline(drafted.spec);
-      summary = drafted.summary || templateSummary;
-      source = "grok";
-    } catch {
-      specMarkdown = templateSpec;
-      summary = templateSummary;
-      source = "template";
+        options,
+        plan,
+        profile,
+        settings,
+        files,
+        dir: write,
+        key,
+        stamp,
+        generation,
+        templateSummary,
+      }).catch(() => null);
     }
+    return pending;
+  };
+
+  if (options.awaitSpec) {
+    const upgraded = await upgrade();
+    return upgraded || result;
   }
+  // The template row is already on disk. Start Grok now and let the pipeline
+  // store the template before this promise resolves.
+  result.upgrade = upgrade;
+  upgrade();
+  return result;
+}
 
-  const files = [{ path: "SPEC.md", contents: specMarkdown }, ...plan.files(save, profile).map(normalizeFile)];
-  assertFiles(files);
+async function refineSpec({ save, options, plan, profile, settings, files, dir, key, stamp, generation, templateSummary }) {
+  const drafted = await draftSpec({
+    llm: settings,
+    fetchImpl: options.fetchImpl || options.llmFetch || globalThis.fetch,
+    profileName: profile.name,
+    save,
+    fallbackSummary: templateSummary,
+    timeoutMs: options.specTimeoutMs,
+  });
+  const current = readCache(dir, stamp);
+  if (!current || current.generation !== generation) return null;
+  const spec = ensureTrailingNewline(drafted.spec);
+  const nextFiles = files.map((file) => (file.path === "SPEC.md" ? { path: "SPEC.md", contents: spec } : file));
+  const manifest = writeTree(dir, {
+    ...current,
+    source: "grok",
+    summary: drafted.summary || templateSummary,
+  }, nextFiles);
+  const upgraded = toResult(dir, key, manifest, false);
+  await publishUpgrade(options.db, save.id, generation, upgraded);
+  return upgraded;
+}
 
+async function publishUpgrade(db, id, generation, upgraded) {
+  if (!db || id == null) return;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const row = getSave(db, id);
+    if (!row?.action_result_json) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(row.action_result_json);
+    } catch {
+      return;
+    }
+    if (parsed?.act?.generation !== generation) return;
+    parsed.act = upgraded;
+    updateSave(db, id, { action_result_json: JSON.stringify(parsed), status: "done" });
+    return;
+  }
+}
+
+function cacheDirs(key, options) {
+  if (options.outDir) {
+    const dir = path.resolve(options.outDir);
+    return { read: [dir], write: dir };
+  }
+  const runtime = path.join(paths.artifactsRuntime, key);
+  const committed = path.join(paths.artifacts, key);
+  return { read: [runtime, committed], write: runtime };
+}
+
+function writeTree(dir, manifest, files) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   for (const file of files) {
@@ -71,20 +151,9 @@ export async function writeStarter(save, options, plan) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, file.contents);
   }
-
-  writeZip(path.join(dir, plan.zipName), files);
-  const manifest = {
-    generator: GENERATOR,
-    profileHash: stamp,
-    type: plan.type,
-    status: "done",
-    source,
-    summary,
-    zipName: plan.zipName,
-    files: files.map((file) => file.path),
-  };
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  return toResult(dir, key, manifest, false);
+  writeZip(path.join(dir, manifest.zipName), files);
+  fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifest;
 }
 
 export function artifactKey(save) {
@@ -94,7 +163,8 @@ export function artifactKey(save) {
   return crypto.createHash("sha256").update(basis).digest("hex").slice(0, 16);
 }
 
-function readCache(dir, manifestPath, stamp) {
+function readCache(dir, stamp) {
+  const manifestPath = path.join(dir, "manifest.json");
   if (!fs.existsSync(manifestPath)) return null;
   try {
     const cached = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -114,6 +184,7 @@ function toResult(dir, key, manifest, cached) {
     type: manifest.type,
     source: manifest.source,
     cached,
+    generation: manifest.generation,
     summary: manifest.summary,
     specPath: displayPath(path.join(dir, "SPEC.md")),
     zipPath: displayPath(path.join(dir, manifest.zipName)),

@@ -96,6 +96,8 @@ async function storeSorted(db, id, post, options) {
   const latest = getSave(db, id);
   const plan = planSort(latest, basis, generation, options.llm);
   const storedAct = plan.keepAct && action?.status !== "ok" && !action?.attempt_error ? plan.keepAct : action;
+  const specUpgrade = storedAct?.upgrade;
+  if (storedAct && specUpgrade) delete storedAct.upgrade;
   const screenshotPath =
     storedAct?.screenshot_path || (storedAct?.warning ? snapshot?.screenshot_path || latest?.screenshot_path || null : null);
   rememberSortedWhy(db, id, post, plan, options);
@@ -120,6 +122,10 @@ async function storeSorted(db, id, post, options) {
     }),
     error: failed ? action?.error || "Repo run failed" : null,
   });
+  if (specUpgrade) {
+    const pendingSpec = specUpgrade();
+    if (options.awaitSpec) await pendingSpec;
+  }
 
   if (plan.schedule && reserveFlight(db, id, generation)) {
     const upgrade = classifyWithGrok(input, basis, {
@@ -263,7 +269,12 @@ async function applyUpgrade(db, id, generation, upgraded, options) {
   latestAction.sorted.source = "llm";
   latestAction.sorted.details = nextDetails;
   latestAction.sorted.upgrade = "done";
-  latestAction.act = acted;
+  if (kindChanged || urlChanged) {
+    const specUpgrade = acted?.upgrade;
+    if (acted && specUpgrade) delete acted.upgrade;
+    latestAction.act = acted;
+    if (specUpgrade) specUpgrade();
+  }
   const summary = upgraded.summary || latest.summary;
   const patch = {
     status: "done",

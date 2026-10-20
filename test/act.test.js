@@ -6,10 +6,16 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import AdmZip from "adm-zip";
+import express from "express";
+import { once } from "node:events";
 import { act } from "../src/act.js";
+import { mountArtifacts } from "../src/act/serve.js";
 import { XAI_CHAT_COMPLETIONS } from "../src/act/llm.js";
 import { sampleSave } from "../src/act/sample.js";
 import { renderFileList, renderZipLink } from "../src/act/snippet.js";
+import { createSave, getSave, openDb, updateSave } from "../src/db.js";
+import { paths } from "../src/paths.js";
+import { runPipeline } from "../src/pipeline.js";
 
 const execFileAsync = promisify(execFile);
 const LOOP = "https://x.com/0xCodez/status/2069736449902027136";
@@ -127,12 +133,15 @@ test("XAI_API_KEY calls Grok and any failure keeps the template", async () => {
   const drafted = await act(save, {
     env: { XAI_API_KEY: "test-key" },
     outDir: path.join(dir, "ok"),
+    awaitSpec: true,
+    specTimeoutMs: 200,
     fetchImpl: async (url, init) => {
       calls += 1;
       assert.equal(url, XAI_CHAT_COMPLETIONS);
       assert.equal(init.headers.authorization, "Bearer test-key");
       const body = JSON.parse(init.body);
       assert.equal(body.model, "grok-4.7");
+      assert.equal(body.reasoning_effort, "low");
       assert.equal(init.signal instanceof AbortSignal, true);
       return {
         ok: true,
@@ -161,6 +170,8 @@ test("XAI_API_KEY calls Grok and any failure keeps the template", async () => {
   const fallback = await act(save, {
     env: { XAI_API_KEY: "test-key", XAI_BASE_URL: "https://api.x.ai/v1/", XAI_MODEL: "grok-test" },
     outDir: path.join(dir, "fallback"),
+    awaitSpec: true,
+    specTimeoutMs: 200,
     fetchImpl: async (url, init) => {
       assert.equal(url, "https://api.x.ai/v1/chat/completions");
       assert.equal(JSON.parse(init.body).model, "grok-test");
@@ -169,6 +180,163 @@ test("XAI_API_KEY calls Grok and any failure keeps the template", async () => {
   });
   assert.equal(fallback.source, "template");
   assert.match(fs.readFileSync(path.join(dir, "fallback/SPEC.md"), "utf8"), /Schedule → Discover → Build → Verify → Repeat/);
+});
+
+test("a 400 that names reasoning_effort is retried once without that field", async () => {
+  const save = await sampleSave(LOOP);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "act-retry-"));
+  const grokSpec = `# SPEC from Grok\n\nSrinikhil runs Schedule, Discover, Build, Verify on every scrape.\n\n${"Apply the loop to one failed scrape and write the verdict to disk. ".repeat(8)}`;
+  const bodies = [];
+  const drafted = await act(save, {
+    env: { XAI_API_KEY: "test-key" },
+    outDir: dir,
+    awaitSpec: true,
+    specTimeoutMs: 200,
+    fetchImpl: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      bodies.push(body.reasoning_effort);
+      if (bodies.length === 1) {
+        return { ok: false, status: 400, text: async () => "unknown parameter reasoning_effort" };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ spec: grokSpec, summary: "Retried without reasoning_effort." }) } }],
+        }),
+      };
+    },
+  });
+  assert.deepEqual(bodies, ["low", undefined]);
+  assert.equal(drafted.source, "grok");
+  assert.match(fs.readFileSync(path.join(dir, "SPEC.md"), "utf8"), /SPEC from Grok/);
+});
+
+test("a stalled Grok spec returns the template zip immediately", async () => {
+  const save = await sampleSave(LOOP);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "act-stall-"));
+  let calls = 0;
+  let sawEffort = null;
+  const started = Date.now();
+  const result = await act(save, {
+    env: { XAI_API_KEY: "test-key" },
+    outDir: dir,
+    specTimeoutMs: 80,
+    fetchImpl: (_url, init) =>
+      new Promise((_resolve, reject) => {
+        calls += 1;
+        sawEffort = JSON.parse(init.body).reasoning_effort;
+        const fail = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        if (init.signal?.aborted) fail();
+        else init.signal?.addEventListener("abort", fail, { once: true });
+      }),
+  });
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 500, `act returned in ${elapsed}ms`);
+  assert.equal(result.status, "done");
+  assert.equal(result.source, "template");
+  assert.equal(calls, 1);
+  assert.equal(sawEffort, "low");
+  assert.match(fs.readFileSync(path.join(dir, "SPEC.md"), "utf8"), /Saved to Shipped is this loop/);
+  await result.upgrade();
+  assert.equal(calls, 1);
+  assert.match(fs.readFileSync(path.join(dir, "SPEC.md"), "utf8"), /Saved to Shipped is this loop/);
+});
+
+test("Grok swaps the stored spec after the template row is saved", async () => {
+  const save = await sampleSave(LOOP);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "act-publish-"));
+  const db = openDb(":memory:");
+  const row = createSave(db, LOOP);
+  const grokSpec = `# SPEC from Grok\n\nSrinikhil runs Schedule, Discover, Build, Verify on every scrape.\n\n${"Apply the loop to one failed scrape and write the verdict to disk. ".repeat(8)}`;
+  try {
+    const result = await act(
+      { ...save, id: row.id },
+      {
+        env: { XAI_API_KEY: "test-key" },
+        outDir: dir,
+        db,
+        specTimeoutMs: 200,
+        fetchImpl: async () => ({
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ spec: grokSpec, summary: "Grok drafted the loop spec for Srinikhil." }) } }],
+          }),
+        }),
+      },
+    );
+    assert.equal(result.source, "template");
+    const stored = { ...result };
+    delete stored.upgrade;
+    updateSave(db, row.id, {
+      status: "done",
+      action_result_json: JSON.stringify({ act: stored }),
+    });
+    await result.upgrade();
+    const parsed = JSON.parse(getSave(db, row.id).action_result_json);
+    assert.equal(parsed.act.source, "grok");
+    assert.match(fs.readFileSync(path.join(dir, "SPEC.md"), "utf8"), /SPEC from Grok/);
+  } finally {
+    db.close();
+  }
+});
+
+test("a forced rebuild writes the runtime dir and leaves the committed zip untouched", async () => {
+  const key = "2069736449902027136";
+  const committedZip = path.join(paths.artifacts, key, "loop-engineering.zip");
+  const before = fs.readFileSync(committedZip);
+  const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "act-runtime-"));
+  const previous = paths.artifactsRuntime;
+  paths.artifactsRuntime = runtimeRoot;
+  const db = openDb(":memory:");
+  try {
+    const row = createSave(db, LOOP);
+    const started = Date.now();
+    const done = await runPipeline(db, row.id, { offline: true, force: true, childEnv: {} });
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 2000, `pipeline returned in ${elapsed}ms`);
+    assert.equal(done.status, "done");
+    const action = JSON.parse(done.action_result_json).act;
+    assert.equal(action.source, "template");
+    assert.equal(action.cached, false);
+    assert.equal(action.zipUrl, `/artifacts/${key}/loop-engineering.zip`);
+    assert.ok(before.equals(fs.readFileSync(committedZip)));
+    assert.equal(fs.existsSync(path.join(runtimeRoot, key, "loop-engineering.zip")), true);
+    assert.equal(fs.existsSync(path.join(paths.artifacts, key, "loop-engineering.zip")), true);
+  } finally {
+    paths.artifactsRuntime = previous;
+    db.close();
+    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test("the artifact server prefers a runtime file over the committed copy", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "act-serve-"));
+  const committed = path.join(root, "committed");
+  const runtime = path.join(root, "runtime");
+  fs.mkdirSync(path.join(committed, "abc"), { recursive: true });
+  fs.mkdirSync(path.join(runtime, "abc"), { recursive: true });
+  fs.writeFileSync(path.join(committed, "abc/loop-engineering.zip"), "committed-bytes");
+  fs.writeFileSync(path.join(runtime, "abc/loop-engineering.zip"), "runtime-bytes");
+  fs.writeFileSync(path.join(committed, "abc/only-committed.txt"), "seed");
+  const app = express();
+  mountArtifacts(app, { committed, runtime });
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const preferred = await fetch(`${base}/artifacts/abc/loop-engineering.zip`);
+    assert.equal(preferred.status, 200);
+    assert.match(preferred.headers.get("content-type") || "", /zip/);
+    assert.equal(await preferred.text(), "runtime-bytes");
+    const fallback = await fetch(`${base}/artifacts/abc/only-committed.txt`);
+    assert.equal(fallback.status, 200);
+    assert.equal(await fallback.text(), "seed");
+    const escaped = await fetch(`${base}/artifacts/abc/..%2F..%2Fetc/passwd`);
+    assert.equal(escaped.status, 404);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
 });
 
 test("offline repo replays its cache and the zip link only accepts artifact paths", async () => {
